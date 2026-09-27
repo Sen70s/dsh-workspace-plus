@@ -1,4 +1,4 @@
-# dsh-workspaceplus
+# dsh-workspace-plus
 
 DeepSeek Harness Web GUI 的插件。一个功能，两个入口：
 
@@ -20,9 +20,9 @@ DeepSeek Harness Web GUI 的插件。一个功能，两个入口：
 ## 目录结构
 
 ```
-dsh-workspaceplus/
+dsh-workspace-plus/
 ├── package.json        # dsh.bundle（patch 层）+ dsh.client（浏览器半声明）
-├── cordis.patch.yml    # bundle 层：insert 一行 name: 'dsh-workspaceplus'
+├── cordis.patch.yml    # bundle 层：insert 一行 name: 'dsh-workspace-plus'
 ├── lib/
 │   ├── index.js        # 宿主半：store + 设置 + 上下文注入 + workspace_dirs 工具 + HTTP 路由
 │   └── client.js       # 浏览器半：设置页 + 目录弹窗 + 工作区行按钮（无需构建）
@@ -64,8 +64,8 @@ dsh-workspaceplus/
 {
   "version": 1,
   "workspaces": {
-    "d:\\plugins\\dsh\\dsh-workspaceplus": {
-      "path": "D:\\plugins\\dsh\\dsh-workspaceplus",
+    "d:\\proj": {
+      "path": "D:\\proj",
       "dirs": [
         { "label": "backend", "path": "D:\\proj\\backend", "note": "后端 API" },
         { "label": "docs",    "path": "D:\\docs" }
@@ -218,20 +218,23 @@ for (const root of writableRoots(policy)) if (await isPathUnder(fresh.targetKey,
 从 npm 安装（推荐）：
 
 ```sh
-dsh plugin --profile desktop add dsh-workspaceplus
+dsh plugin --profile desktop add dsh-workspace-plus
 ```
 
 也可以直接从 GitHub 或本地 checkout 安装：
 
 ```sh
 dsh plugin --profile desktop add github:Sen70s/dsh-workspace-plus
-dsh plugin --profile desktop add D:\plugins\dsh\dsh-workspaceplus
+dsh plugin --profile desktop add <本地 checkout 目录>
 ```
 
 `lib/` 是仓库里已提交的产物、包内没有 `prepare` 构建脚本，所以上面三种方式都不需要
 pnpm 的 `allowBuilds` 构建授权，装到的就是可直接加载的代码。想锁定版本可以用
-`github:Sen70s/dsh-workspace-plus#v0.1.0`。要求 DSH `>=0.1.7-rc.2`（桌面版当前就是
+`github:Sen70s/dsh-workspace-plus#v0.1.1`。要求 DSH `>=0.1.7-rc.2`（桌面版当前就是
 `@deepseek-ai/dsh-desktop 0.1.7-rc.2`；npm 上是 `next` 通道）。
+
+> 0.1.0 曾以包名 `dsh-workspaceplus` 发布；自 0.1.1 起更名为 `dsh-workspace-plus`，旧包已废弃，
+> 请勿再安装。
 
 装完后**重启 `dsh`** 并刷新页面。悬停任一工作区那一行，操作区会多出一个目录图标，点它打开弹窗；
 设置面板里会多出一个 `workspace+` 分区（默认工作区默认关闭，见下一节）。
@@ -239,7 +242,7 @@ pnpm 的 `allowBuilds` 构建授权，装到的就是可直接加载的代码。
 卸载：
 
 ```sh
-dsh plugin --profile desktop remove dsh-workspaceplus
+dsh plugin --profile desktop remove dsh-workspace-plus
 ```
 
 ## 使用
@@ -302,7 +305,7 @@ node tools/verify.mjs
 重启成功的判据是启动终端里的这一行：
 
 ```
-[dsh-workspaceplus] host half loaded — workspace label routing is active (<state file path>)
+[dsh-workspace-plus] host half loaded — workspace label routing is active (<state file path>)
 ```
 
 没有这行说明该插件行加载失败，去 **设置 → 插件** 看它的状态。另一个快速判据：

@@ -1,5 +1,5 @@
 /**
- * Offline verification for the dsh-workspaceplus plugin bundle.
+ * Offline verification for the dsh-workspace-plus plugin bundle.
  *
  * Run with: node tools/verify.mjs
  *
@@ -703,14 +703,14 @@ ok(
     head.children[0].dataset.plugin === pkg.name,
   `tags=${head.children.length}`,
 )
-ok('lib/client.js: the stylesheet is namespaced', head.children[0]?.textContent.includes('.dsh-workspaceplus-'))
-ok('lib/client.js: the stylesheet styles the injected row button', head.children[0]?.textContent.includes('.dsh-workspaceplus-rowbtn'))
+ok('lib/client.js: the stylesheet is namespaced', head.children[0]?.textContent.includes('.dsh-workspace-plus-'))
+ok('lib/client.js: the stylesheet styles the injected row button', head.children[0]?.textContent.includes('.dsh-workspace-plus-rowbtn'))
 {
   // The button must look like the shell's own row actions, whose `.iconButton` is
   // 16x16, transparent, tertiary-colored, and changes only its COLOR on hover.
   const css = String(head.children[0]?.textContent ?? '')
-  const base = css.match(/\.dsh-workspaceplus-rowbtn\{([^}]*)\}/)?.[1] ?? ''
-  const hover = css.match(/\.dsh-workspaceplus-rowbtn:hover\{([^}]*)\}/)?.[1] ?? ''
+  const base = css.match(/\.dsh-workspace-plus-rowbtn\{([^}]*)\}/)?.[1] ?? ''
+  const hover = css.match(/\.dsh-workspace-plus-rowbtn:hover\{([^}]*)\}/)?.[1] ?? ''
   ok('row button CSS: matches the shell icon metrics', base.includes('width:16px') && base.includes('height:16px'), base.slice(0, 60))
   ok('row button CSS: no resting background', base.includes('background:0 0') && !base.includes('interactive-bg-hover'))
   ok('row button CSS: uses the shell tertiary label color', base.includes('color:var(--dsw-alias-label-tertiary)'))
@@ -1289,4 +1289,4 @@ if (failed.length > 0) {
   console.error(`\n${failed.length} check(s) failed`)
   process.exit(1)
 }
-console.log('dsh-workspaceplus bundle verified.')
+console.log('dsh-workspace-plus bundle verified.')

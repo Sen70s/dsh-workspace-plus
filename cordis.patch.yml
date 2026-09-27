@@ -1,7 +1,7 @@
-# dsh-workspaceplus bundle patch.
+# dsh-workspace-plus bundle patch.
 #
 # This file is the package's `dsh.bundle.patch` layer: a top-level YAML array of
-# loader patch entries, applied when a profile lists `dsh-workspaceplus` in
+# loader patch entries, applied when a profile lists `dsh-workspace-plus` in
 # `dsh.profile.bundles`. The `insert` list appends one loader row; `name` is the
 # package name (never a relative source path), because the profile resolves it
 # through Node module resolution from the profile directory.
@@ -13,4 +13,4 @@
 # settings section.
 - insert:
     - id: workspaceplus
-      name: 'dsh-workspaceplus'
+      name: 'dsh-workspace-plus'
