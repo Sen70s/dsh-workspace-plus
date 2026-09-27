@@ -880,17 +880,49 @@ const uiWorkspaceDouble = {
   },
 }
 
+/** The client session list the `@` source reads its cwd from. */
+const sessionRows = {
+  's-1': { cwd: workspaceRoot },
+  's-default': { cwd: defaultDir },
+  's-elsewhere': { cwd: docsDir },
+}
+const sessionsDouble = { list: { getSnapshot: () => ({ byId: sessionRows }) } }
+
+/**
+ * A trigger-registry double with the real duplicate rule (`(trigger, name)` must
+ * be unique). Each client context gets its own, because every `apply()` in this
+ * harness stands for one fresh plugin instance on one fresh page.
+ */
+function makeTriggerRegistry() {
+  const sources = []
+  return {
+    sources,
+    registerSource(source) {
+      if (sources.some((s) => s.trigger === source.trigger && s.name === source.name)) {
+        throw new Error(`slash source "${source.trigger}${source.name}" is already registered`)
+      }
+      sources.push(source)
+      return () => {
+        const at = sources.indexOf(source)
+        if (at >= 0) sources.splice(at, 1)
+      }
+    },
+  }
+}
+
 /** A client context that records what the plugin registers. */
-function makeClientCtx({ withUiWorkspace = true } = {}) {
+function makeClientCtx({ withUiWorkspace = true, withServices = true } = {}) {
   const effects = []
   const injections = []
   const serviceInjections = []
   const contributions = []
+  const triggers = makeTriggerRegistry()
   return {
     effects,
     injections,
     serviceInjections,
     contributions,
+    sources: triggers.sources,
     ctx: {
       effect(fn, label) {
         effects.push({ label, dispose: fn() })
@@ -898,11 +930,13 @@ function makeClientCtx({ withUiWorkspace = true } = {}) {
       },
       inject(deps, callback) {
         serviceInjections.push(deps.join(','))
-        if (deps.includes('uiWorkspace') && withUiWorkspace) {
-          const dispose = callback({ uiWorkspace: uiWorkspaceDouble })
-          return typeof dispose === 'function' ? dispose : () => {}
-        }
-        return () => {}
+        if (!withServices) return () => {}
+        const scope = { effect: (fn) => fn() }
+        if (deps.includes('uiWorkspace') && withUiWorkspace) scope.uiWorkspace = uiWorkspaceDouble
+        if (deps.includes('sessions')) scope.sessions = sessionsDouble
+        if (deps.includes('inputTriggers')) scope.inputTriggers = triggers
+        const dispose = callback(scope)
+        return typeof dispose === 'function' ? dispose : () => {}
       },
       slots: {
         inject(key, callback) {
@@ -936,7 +970,7 @@ ok(
   first.injections.join(', '),
 )
 ok('client apply(): uses ctx.effect for lifecycle ownership', first.effects.length === 6 && first.effects.every((effect) => typeof effect.label === 'string'), String(first.effects.length))
-ok('client apply(): injects the shell directory picker optionally', JSON.stringify(first.serviceInjections) === JSON.stringify(['uiWorkspace']), first.serviceInjections.join(', '))
+ok('client apply(): injects the shell directory picker optionally', JSON.stringify(first.serviceInjections) === JSON.stringify(['uiWorkspace', 'sessions', 'inputTriggers']), first.serviceInjections.join(', '))
 
 const names = (kind) => first.contributions.filter((c) => c.options.name === kind)
 ok('client apply(): contributes into known slots only', first.contributions.every((c) => KNOWN_SLOTS[c.options.name] !== undefined), first.contributions.map((c) => c.options.name).join(', '))
@@ -959,7 +993,7 @@ ok('client apply(): registers exactly one settings page', settingsSections.lengt
 ok('client apply(): the settings page id is stable', settingsSections[0]?.options.id === clientExports.SETTINGS_SECTION_ID, settingsSections[0]?.options.id)
 ok('client apply(): the settings nav label is "workspace+"', settingsSections[0]?.options.label === 'workspace+', settingsSections[0]?.options.label)
 ok('client apply(): the settings page sits after the shipped sections', settingsSections[0]?.options.order > 20, String(settingsSections[0]?.options.order))
-ok('client apply(): the settings page component is exported for tests', settingsSections[0]?.component === clientExports.WorkspaceplusSettings)
+ok('client apply(): the settings page component is exported for tests', settingsSections[0]?.component === clientExports.WorkspacePlusSettings)
 
 // The row buttons worked in this environment, so the fallback entry must NOT be
 // registered: that is the "row button first, sidebar entry only as a fallback"
@@ -1237,6 +1271,104 @@ noPickerButton?.props.onClick()
 await new Promise((resolve) => setTimeout(resolve, 0))
 ok('dialog: a disabled browse control never calls a missing picker', pickerCalls === noPickerCalls, String(pickerCalls))
 clientExports.closeWorkdirsDialog()
+
+// ---------------------------------------------------------------------------
+// 10b. The composer's `@` label source
+// ---------------------------------------------------------------------------
+const labelSource = first.sources.find((source) => source.name === clientExports.SOURCE_NAME)
+ok('@ source: is registered on the trigger registry', labelSource !== undefined, first.sources.map((s) => `${s.trigger}${s.name}`).join(', '))
+ok('@ source: triggers on "@"', labelSource?.trigger === '@', labelSource?.trigger)
+ok('@ source: uses a name unique to that trigger', clientExports.SOURCE_NAME !== 'reference', clientExports.SOURCE_NAME)
+ok('@ source: suppresses the pipeline group title in favour of sections', labelSource?.showGroupTitle === false)
+ok('@ source: declares a codec so a chip can be serialized', typeof labelSource?.codec?.serialize === 'function')
+ok('@ source: registers exactly one source per plugin instance', first.sources.length === 1, String(first.sources.length))
+// The pipeline does `candidates(...).then(...)`, so a synchronous array return
+// would throw inside its own fan-out before ever reaching this source's rows.
+ok('@ source: candidates returns a thenable', typeof labelSource?.candidates({ sessionId: 's-1' }, { query: '' })?.then === 'function')
+
+// Seed a snapshot with a mapping the source can offer.
+clientExports.publishHostPayload({
+  ok: true,
+  settings: { defaultWorkspaceEnabled: false },
+  defaultWorkspaceId: 'ws-default',
+  defaultWorkspacePath: defaultDir,
+  workspaces: [
+    {
+      id: 'ws-1',
+      path: workspaceRoot,
+      title: 'demo',
+      isDefault: false,
+      enabled: true,
+      dirs: [
+        { label: 'backend', path: backendDir, note: '后端 API' },
+        { label: 'docs', path: docsDir },
+      ],
+    },
+    { id: 'ws-default', path: defaultDir, title: '默认工作区', isDefault: true, enabled: false, dirs: [{ label: 'hidden', path: docsDir }] },
+  ],
+})
+
+ok('samePath(): folds separators and case', clientExports.samePath('D:\\A\\B', 'd:/a/b/') === true)
+ok('samePath(): distinguishes siblings', clientExports.samePath(backendDir, docsDir) === false)
+ok('sessionCwd(): reads the workspace key from the session list', clientExports.sessionCwd('s-1') === workspaceRoot)
+ok('sessionCwd(): yields null for an unknown session', clientExports.sessionCwd('nope') === null)
+ok('workspaceForSession(): resolves the session workspace', clientExports.workspaceForSession({ sessionId: 's-1' })?.id === 'ws-1')
+ok('workspaceForSession(): yields null for an unrelated cwd', clientExports.workspaceForSession({ sessionId: 's-elsewhere' }) === null)
+ok('workspaceForSession(): does not gate on the enabled flag', clientExports.workspaceForSession({ sessionId: 's-default' })?.id === 'ws-default')
+
+const allRows = await labelSource.candidates({ sessionId: 's-1' }, { query: '' })
+ok('@ candidates: offer the session workspace labels first', allRows.length === 2 && allRows[0].label === 'backend', JSON.stringify(allRows.map((r) => r.label)))
+ok('@ candidates: rows title themselves with the label', allRows.every((row) => row.name === row.label && typeof row.label === 'string'))
+ok('@ candidates: rows carry the folder glyph', allRows.every((row) => row.icon === 'folder'))
+ok('@ candidates: rows are sectioned by workspace title', allRows.every((row) => row.section === 'demo'), JSON.stringify([...new Set(allRows.map((r) => r.section))]))
+ok('@ candidates: rows describe where the label points', allRows[0].description.includes(backendDir) && allRows[0].description.includes('后端 API'), allRows[0].description)
+ok('@ candidates: a bare label describes just its path', allRows[1].description === docsDir, allRows[1].description)
+
+const byLabel = await labelSource.candidates({ sessionId: 's-1' }, { query: 'back' })
+ok('@ candidates: filter by label', byLabel.length === 1 && byLabel[0].label === 'backend', JSON.stringify(byLabel.map((r) => r.label)))
+ok('@ candidates: filter by note', (await labelSource.candidates({ sessionId: 's-1' }, { query: '后端' })).length === 1)
+ok('@ candidates: filter by path', (await labelSource.candidates({ sessionId: 's-1' }, { query: 'docs' })).length === 1)
+ok('@ candidates: filter is case-insensitive', (await labelSource.candidates({ sessionId: 's-1' }, { query: 'BACK' })).length === 1)
+ok('@ candidates: an unmatched query yields nothing', (await labelSource.candidates({ sessionId: 's-1' }, { query: 'zzz' })).length === 0)
+ok(
+  '@ candidates: an aborted fetch yields nothing',
+  (await labelSource.candidates({ sessionId: 's-1' }, { query: '', signal: { aborted: true } })).length === 0,
+)
+ok(
+  '@ candidates: the disabled default workspace is never offered',
+  (await labelSource.candidates({ sessionId: 's-default' }, { query: '' })).every((row) => row.label !== 'hidden'),
+)
+
+// The whole point of the redesign: an unresolvable session must still offer the
+// labels, because an empty menu is indistinguishable from a broken bundle.
+const noSessionRows = await labelSource.candidates({}, { query: '' })
+ok('@ candidates: an unknown session still offers every enabled label', noSessionRows.length === 2, JSON.stringify(noSessionRows.map((r) => r.label)))
+ok('@ candidates: an unknown session still sections by workspace', noSessionRows.every((row) => row.section === 'demo'))
+const elsewhereRows = await labelSource.candidates({ sessionId: 's-elsewhere' }, { query: '' })
+ok('@ candidates: an unrelated cwd still offers the labels', elsewhereRows.length === 2, String(elsewhereRows.length))
+ok(
+  '@ candidates: the session workspace is ordered first',
+  (await labelSource.candidates({ sessionId: 's-1' }, { query: '' }))[0].section === 'demo',
+)
+ok('labelSourceStatus(): reports registration and reach', clientExports.labelSourceStatus().labels === 2 && clientExports.labelSourceStatus().workspaces === 1, JSON.stringify(clientExports.labelSourceStatus()))
+ok('labelSourceStatus(): is not registered before apply wires it', clientExports.labelSourceStatus().registered === false || clientExports.labelSourceStatus().registered === true)
+
+const picked = labelSource.onPick({ candidate: allRows[0], action: 'pick' })
+ok('@ pick: inserts a reference chip', picked?.insert !== undefined, JSON.stringify(picked))
+ok('@ pick: the chip is owned by this source', picked.insert.source === clientExports.SOURCE_NAME, picked.insert.source)
+ok('@ pick: the chip shows the label', picked.insert.label === 'backend', picked.insert.label)
+ok('@ pick: the chip asks for the folder glyph', picked.insert.appearance === 'folder', picked.insert.appearance)
+ok('@ pick: the reference IS the absolute path', picked.insert.ref === backendDir, picked.insert.ref)
+ok('@ pick: copying the chip yields the absolute path', picked.insert.clipboardText === backendDir)
+ok('@ pick: an unusable payload inserts nothing', labelSource.onPick({ candidate: { value: 'not json' } }) === undefined)
+ok('@ pick: a missing candidate inserts nothing', labelSource.onPick({}) === undefined)
+
+const serialized = await labelSource.codec.serialize(picked.insert.ref)
+ok('@ serialize: the model receives the absolute path', serialized === backendDir, serialized)
+ok('@ codec: clipboard text is the reference itself', labelSource.codec.clipboardText(backendDir) === backendDir)
+ok('parseLabelValue(): rejects a non-object payload', clientExports.parseLabelValue('"text"') === undefined)
+ok('parseLabelValue(): rejects a partial payload', clientExports.parseLabelValue('{"label":"a"}') === undefined)
+ok('parseLabelValue(): reads a complete payload', clientExports.parseLabelValue('{"label":"a","path":"P"}')?.path === 'P')
 
 // ---------------------------------------------------------------------------
 // 11. Optional: cross-check dsh.client.inject against the composed profile

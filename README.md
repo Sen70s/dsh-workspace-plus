@@ -1,13 +1,14 @@
 # dsh-workspace-plus
 
-DeepSeek Harness Web GUI 的插件。一个功能，两个入口：
+DeepSeek Harness Web GUI 的插件。一个功能，三个入口：
 
 | 入口 | 说明 |
 | --- | --- |
 | **工作区行上的目录按钮**（弹窗） | 一个工作区登记 N 个目录，每个目录带标签；标签在对话里可直接指代 |
+| **对话输入框里的 `@`** | 打 `@` 就能看到本工作区的标签，选中即插入一个指向该目录绝对路径的引用 |
 | **设置 → `workspace+`** | 一个开关：是否对**默认工作区**启用本功能（**默认关闭**） |
 
-功能 2 解决的问题：一个工作区（DSH 里 = 一个目录）装不下真实项目。前后端分在两个仓库、文档在第三个目录时，
+它解决的问题：一个工作区（DSH 里 = 一个目录）装不下真实项目。前后端分在两个仓库、文档在第三个目录时，
 每次都要在对话里手写绝对路径，而且目录名相似时 agent 容易改错文件。本插件让工作区带上
 「标签 → 绝对路径」映射，并**在每个请求里把这张表注入 agent 上下文**，于是：
 
@@ -27,7 +28,8 @@ dsh-workspace-plus/
 │   ├── index.js        # 宿主半：store + 设置 + 上下文注入 + workspace_dirs 工具 + HTTP 路由
 │   └── client.js       # 浏览器半：设置页 + 目录弹窗 + 工作区行按钮（无需构建）
 ├── icon.svg            # 插件管理页显示的图标
-├── tools/verify.mjs    # 离线自检（258 项断言，不需要 DSH 在跑）
+├── LICENSE             # MIT
+├── tools/verify.mjs    # 离线自检（329 项断言，不需要 DSH 在跑）
 └── README.md
 ```
 
@@ -112,6 +114,8 @@ dsh-workspace-plus/
 
 ### 界面：一个弹窗，两个触发器
 
+（第三个入口 —— 对话输入框里的 `@` —— 见下面单独一节。）
+
 弹窗本身注册在 **`shell.overlay`** —— 和壳层自己的「重命名工作区 / 删除工作区」对话框同一个层
 （那两个是 `workspace.session-rename`、`workspace.session-archive`），所以观感和层级天然一致。
 
@@ -157,6 +161,32 @@ dsh-workspace-plus/
 
 > 唯一的例外是兜底入口：它是全局的、没有工作区上下文，所以那条路径下弹窗会退回显示选择器。
 > 正常使用中不会看到它。
+
+## 对话输入框里的 `@`
+
+在会话里打 `@` 会多出一组「工作区目录」候选 —— 就是已登记的标签，可以按标签、说明或路径过滤。
+选中后插入一个引用 chip：**chip 显示标签，提交给模型的是那个目录的绝对路径**。
+
+这样一来，即使注入的标签表因为上下文压缩而不在了，模型拿到的仍然是路径本身，指代不会失焦：
+
+> `@backend 加个健康检查` → 模型收到 `D:\proj\backend 加个健康检查`
+
+候选来自**所有已启用的工作区**，按工作区标题分节；**当前会话所在工作区排在最前**（能读到它的 cwd 时）。
+会话查找只是排序优化，不是前置条件 —— 早先按「只会话工作区」出候选的写法有个致命缺点：只要 cwd 读不到，
+整组就静默变空，而空菜单和坏 bundle 从外面看一模一样，无法证伪。
+
+实现要点（都在 [lib/client.js](lib/client.js) 里，用壳层的 input trigger 管线）：
+
+| 事项 | 做法 |
+| --- | --- |
+| 注册 | `ctx.inject(['inputTriggers'], …)` → `registerSource({ trigger: '@', name: 'workspace-plus', … })`；`(trigger, name)` 必须唯一，`@reference` 是官方占用的 |
+| 候选 | 所有 `enabled !== false` 且登记了目录的工作区；默认工作区开关关着时自然被排除 |
+| 排序 | 从管道给的 `{ sessionId }` 反查 cwd（`sessions.list` 投影，与 `ui-reference`/`ui-session` 同一处），命中的工作区提到最前；读不到就按原序 |
+| **必须是 async** | 管线是 `source.candidates(...).then(...)` 直接调用 —— 同步返回数组会在它自己的循环里抛错 |
+| 分组标题 | `showGroupTitle: false` + 每行自带 `section`（工作区标题），否则标题会是管道字典里查不到的 key |
+| chip | `appearance: 'folder'` → 文件夹图标、且不会被标成可点开；点击时因为本 source 没有 `openReference` 而是安全的空操作 |
+| 序列化 | 本 source 自带 `codec.serialize(ref) => ref`；**chip 的 serializer 是按 source 名路由的，没有 codec 的 source 会让整次提交被拒** |
+| 自检 | 设置 → `workspace+` 里有一行「输入框 `@` 候选」，直接告诉你候选源是否已注册、共有多少标签 |
 
 ## ⚠ 沙箱：一个会话只有一个可写根
 
@@ -230,14 +260,15 @@ dsh plugin --profile desktop add <本地 checkout 目录>
 
 `lib/` 是仓库里已提交的产物、包内没有 `prepare` 构建脚本，所以上面三种方式都不需要
 pnpm 的 `allowBuilds` 构建授权，装到的就是可直接加载的代码。想锁定版本可以用
-`github:Sen70s/dsh-workspace-plus#v0.1.1`。要求 DSH `>=0.1.7-rc.2`（桌面版当前就是
+`github:Sen70s/dsh-workspace-plus#v0.2.0`。要求 DSH `>=0.1.7-rc.2`（桌面版当前就是
 `@deepseek-ai/dsh-desktop 0.1.7-rc.2`；npm 上是 `next` 通道）。
 
 > 0.1.0 曾以包名 `dsh-workspaceplus` 发布；自 0.1.1 起更名为 `dsh-workspace-plus`，旧包已废弃，
 > 请勿再安装。
 
 装完后**重启 `dsh`** 并刷新页面。悬停任一工作区那一行，操作区会多出一个目录图标，点它打开弹窗；
-设置面板里会多出一个 `workspace+` 分区（默认工作区默认关闭，见下一节）。
+设置面板里会多出一个 `workspace+` 分区（默认工作区默认关闭，见下一节）；
+对话输入框里打 `@` 会多出一组「工作区目录」候选。
 
 卸载：
 
@@ -247,12 +278,13 @@ dsh plugin --profile desktop remove dsh-workspace-plus
 
 ## 使用
 
-界面上：悬停工作区行 → 点目录图标 → 填「标签 / 绝对路径 / 说明」→ 添加。弹窗已经锁定在这个工作区上，
-不需要（也不能）再选一次。默认工作区要先在 设置 → `workspace+` 里打开开关，它的行上才会出现那个图标；
-此时也可以直接在设置页里管理，或让 agent 用 `workspace_dirs`。
+界面上：悬停工作区行 → 点目录图标 → 填「标签 / 绝对路径 / 说明」→ 添加（路径可以点「浏览…」用系统目录选择器）。
+弹窗已经锁定在这个工作区上，不需要（也不能）再选一次。默认工作区要先在 设置 → `workspace+` 里打开开关，
+它的行上才会出现那个图标；此时也可以直接在设置页里管理，或让 agent 用 `workspace_dirs`。
 
 对话里（工作区 = `D:\proj`）：
 
+- 直接打 `@` → 选 `backend` → 输入框里出现一个 `backend` chip，提交后模型收到 `D:\proj\backend`
 - 「把 `D:\proj\backend` 加为 backend 标签，说明写后端 API」→ agent 调 `workspace_dirs add`
 - 「现在有哪些标签？」→ `workspace_dirs list`
 - 「把 backend 改指向 `D:\proj\backend-v2`」→ `workspace_dirs update`
@@ -267,11 +299,11 @@ dsh plugin --profile desktop remove dsh-workspace-plus
 node tools/verify.mjs
 ```
 
-它会（当前 `283/283 checks passed`，另有 1 项按环境跳过）：
+它会（当前 `329/329 checks passed`，另有 1 项按环境跳过）：
 
 - 校验 manifest、patch 层、`dsh.client.inject` 的取值；
 - 用临时 `DSH_HOME` 运行宿主半：标签/路径校验、增删改、去重、大小写折叠、损坏文件容错、原子写；
-- 用假的 Cordis ctx 验证三处注册，并**真实执行** `workspace_dirs` 的 list/add/remove；
+- 用假的 Cordis ctx 验证各处注册，并**真实执行** `workspace_dirs` 的 list/add/remove；
 - 用假的 `node:http` req/res 真实调用 HTTP 路由的 GET/POST/405/401 分支；
 - 在 `node:vm` 里加载浏览器半，用**最小 DOM 替身**（只实现本插件用到的那几个选择器）真实驱动
   工作区行按钮：挂载前不误报、按行注入、未分组行跳过、重复对账幂等、行移除后回收、
@@ -281,10 +313,27 @@ node tools/verify.mjs
   校验**默认工作区闸门**（宿主快照标 disabled 后行按钮消失、开关打开后回来、探测失败会重试），
   校验**目录选择器**（标签猜测始终满足宿主语法、取消不改变任何字段、失败被捕获并给出原因、
   没有挂载 ui-workspace 时按钮自动置灰且不会调用），
+- 校验 **`@` source**（触发器的唯一性、`candidates` 返回 thenable、按标签/说明/路径过滤、
+  默认工作区关闭时不出候选、pick 产出的 chip 与它序列化出的绝对路径一致、坏 payload 不插入），
   并用最小 React + Button/Switch/Modal 桩**真实渲染**设置页（含拨动开关 → POST 一次 settings op →
   共享快照更新）与弹窗/面板的各状态文案。
 
 ## 故障排查
+
+### 输入框打 `@` 有「文件与文件夹」，但没有「工作区目录」
+
+**先看 设置 → `workspace+` 里的「输入框 `@` 候选」那一行**，它把三种情况分开了：
+
+| 那一行显示 | 含义与处理 |
+| --- | --- |
+| `候选源未注册` | 当前页面跑的还是旧 bundle。**重启 `dsh` 并强制刷新页面**（Ctrl+Shift+R） |
+| `候选源已注册，但还没有可用的标签` | 代码是新的，只是没有可登记目录 —— 去工作区行里加标签；或者这个工作区是默认工作区而开关关着 |
+| `候选源已注册，共 N 个标签` | 代码和数据都就位。若菜单里仍看不到，多半是这一组的行被 `@reference` 的文件/会话组挤到可视区之外，滚动菜单看看 |
+
+**为什么必须重启而不能只刷新**：客户端 bundle 的 URL 带一个由 `mtime/ctime/size` 派生的 `rev`，
+而 rev 只在宿主重新组合模块图时才更新（`dsh-client-modules` 的 `rebuilt()`）。文件内容是在**首次 GET**
+时读取并缓存的，所以 rev 不变，刷新只会拿回缓存里的旧 bundle。宿主侧的重载驱动是 `dsh-hmr`，
+你 profile 里它的 `root` 是空的 —— 也就是不监听这个插件目录。
 
 ### 工作区行上没有出现目录按钮
 

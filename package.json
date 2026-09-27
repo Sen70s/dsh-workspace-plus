@@ -1,7 +1,7 @@
 {
   "name": "dsh-workspace-plus",
-  "version": "0.1.1",
-  "description": "DeepSeek Harness plugin: give a workspace a label -> absolute-path directory map, injected into every request, and manageable from the workspace row or the workspace_dirs tool.",
+  "version": "0.2.0",
+  "description": "DeepSeek Harness plugin: label several directories inside one workspace and reference them by absolute path. Type @ in the composer to pick a label, manage them from the workspace row or the workspace_dirs tool, and the label table is injected into every request.",
   "icon": "icon.svg",
   "type": "module",
   "engines": {
