@@ -1,0 +1,65 @@
+{
+  "name": "dsh-workspaceplus",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness plugin: give a workspace a label -> absolute-path directory map, injected into every request, and manageable from the workspace row or the workspace_dirs tool.",
+  "icon": "icon.svg",
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.1.7-rc.2"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "verify": "node tools/verify.mjs",
+    "prepublishOnly": "node tools/verify.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "deepseek-harness",
+    "cordis",
+    "workspace",
+    "context-injection"
+  ],
+  "author": "Sen70s",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sen70s/dsh-workspaceplus.git"
+  },
+  "homepage": "https://github.com/Sen70s/dsh-workspaceplus#readme",
+  "bugs": {
+    "url": "https://github.com/Sen70s/dsh-workspaceplus/issues"
+  }
+}

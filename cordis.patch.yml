@@ -1,0 +1,16 @@
+# dsh-workspaceplus bundle patch.
+#
+# This file is the package's `dsh.bundle.patch` layer: a top-level YAML array of
+# loader patch entries, applied when a profile lists `dsh-workspaceplus` in
+# `dsh.profile.bundles`. The `insert` list appends one loader row; `name` is the
+# package name (never a relative source path), because the profile resolves it
+# through Node module resolution from the profile directory.
+#
+# The row is a dual-face plugin: the Node half (exports "." -> lib/index.js)
+# runs in the host process, and the browser half (exports "./client" ->
+# lib/client.js) loads in the web GUI because package.json declares `dsh.client`.
+# The browser half is what adds the directory button and the workspace+
+# settings section.
+- insert:
+    - id: workspaceplus
+      name: 'dsh-workspaceplus'
