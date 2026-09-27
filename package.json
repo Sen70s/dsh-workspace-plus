@@ -56,10 +56,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Sen70s/dsh-workspaceplus.git"
+    "url": "git+https://github.com/Sen70s/dsh-workspace-plus.git"
   },
-  "homepage": "https://github.com/Sen70s/dsh-workspaceplus#readme",
+  "homepage": "https://github.com/Sen70s/dsh-workspace-plus#readme",
   "bugs": {
-    "url": "https://github.com/Sen70s/dsh-workspaceplus/issues"
+    "url": "https://github.com/Sen70s/dsh-workspace-plus/issues"
   }
 }

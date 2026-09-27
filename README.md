@@ -224,13 +224,13 @@ dsh plugin --profile desktop add dsh-workspaceplus
 也可以直接从 GitHub 或本地 checkout 安装：
 
 ```sh
-dsh plugin --profile desktop add github:Sen70s/dsh-workspaceplus
+dsh plugin --profile desktop add github:Sen70s/dsh-workspace-plus
 dsh plugin --profile desktop add D:\plugins\dsh\dsh-workspaceplus
 ```
 
 `lib/` 是仓库里已提交的产物、包内没有 `prepare` 构建脚本，所以上面三种方式都不需要
 pnpm 的 `allowBuilds` 构建授权，装到的就是可直接加载的代码。想锁定版本可以用
-`github:Sen70s/dsh-workspaceplus#v0.1.0`。要求 DSH `>=0.1.7-rc.2`（桌面版当前就是
+`github:Sen70s/dsh-workspace-plus#v0.1.0`。要求 DSH `>=0.1.7-rc.2`（桌面版当前就是
 `@deepseek-ai/dsh-desktop 0.1.7-rc.2`；npm 上是 `next` 通道）。
 
 装完后**重启 `dsh`** 并刷新页面。悬停任一工作区那一行，操作区会多出一个目录图标，点它打开弹窗；
