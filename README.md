@@ -395,3 +395,5 @@ if (url.hostname === 'app') {
   [打包与安装](https://deepseek-harness.github.io/deepseek-harness/develop/basic/publish)。
 - **成本提示**：`workspace_dirs` 的工具 schema 会出现在每个会话的每次请求里（约二百 token）。
   不需要自然语言管理时，可以在 profile 里禁用整行，只用界面管理。
+  
+[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/sen70s/dsh-workspace-plus)
