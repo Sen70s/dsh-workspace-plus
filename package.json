@@ -1,6 +1,6 @@
 {
   "name": "dsh-workspace-plus",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "description": "DeepSeek Harness plugin: label several directories inside one workspace and reference them by absolute path. Type @ in the composer to pick a label, manage them from the workspace row or the workspace_dirs tool, and the label table is injected into every request.",
   "icon": "icon.svg",
   "type": "module",

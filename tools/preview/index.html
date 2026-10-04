@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>loading</title>
+    <!-- The shell's own stylesheet: design tokens plus every primitives rule. -->
+    <link rel="stylesheet" href="./theme.css" />
+    <link rel="stylesheet" href="./vendor.css" />
+    <link rel="stylesheet" href="./shell.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #1b1b1c;
+      }
+      /* Headless capture drives no animation clock, so the shell's enter
+         animations (both start at opacity 0) would freeze the dialog invisible. */
+      *,
+      *::before,
+      *::after {
+        animation: none !important;
+      }
+      /* Faint furniture behind the modal mask, so a screenshot of the dialog
+         reads as "over the app" instead of "floating in the void". */
+      .backdrop {
+        position: fixed;
+        inset: 0;
+        padding: 24px 28px;
+        color: #61666b;
+        font: 14px/1.9 system-ui, "Segoe UI", sans-serif;
+      }
+    </style>
+  </head>
+  <body data-ds-dark-theme>
+    <div class="backdrop">
+      <p>wanderisland</p>
+      <p>apps/web · api · docs · admin-ui</p>
+    </div>
+    <div id="root"></div>
+    <script src="./react.development.js"></script>
+    <script src="./react-dom.development.js"></script>
+    <script src="./harness.js"></script>
+    <script src="./client.js"></script>
+    <script src="./boot.js"></script>
+  </body>
+</html>

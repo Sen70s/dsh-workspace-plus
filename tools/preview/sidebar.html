@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>sidebar</title>
+    <link rel="stylesheet" href="./theme.css" />
+    <link rel="stylesheet" href="./vendor.css" />
+    <link rel="stylesheet" href="./shell.css" />
+    <link rel="stylesheet" href="./rows.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--dsw-alias-bg-base);
+        color: var(--dsw-alias-label-primary);
+      }
+      /* Stand-in for the shell's sidebar column. */
+      .frame {
+        box-sizing: border-box;
+        width: 300px;
+        height: 100%;
+        padding: 20px 8px;
+        background: var(--dsw-alias-bg-base);
+      }
+      .caption {
+        margin: 0 0 14px 10px;
+        color: var(--dsw-alias-label-secondary);
+        font: 12px/20px system-ui;
+      }
+      .note {
+        margin: -6px 0 14px 10px;
+        color: var(--dsw-alias-label-tertiary);
+        font: 11px/18px system-ui;
+      }
+      /* The shell reveals the action cluster (and swaps folder→chevron) on hover.
+         Headless capture cannot hover, so the hover state is forced here. */
+      .frame .projectRow .rowActions {
+        display: inline-flex;
+      }
+      .frame .projectRow .chevron {
+        display: inline-flex;
+      }
+      .frame .projectRow .folder {
+        display: none;
+      }
+      /* The first row is drawn as if the pointer is over it, so the screenshot
+         reads the way the shell does on hover. */
+      .frame .projectRow:first-child {
+        background: var(--dsw-alias-interactive-bg-hover);
+      }
+    </style>
+  </head>
+  <body data-ds-dark-theme>
+    <div class="frame">
+      <p class="caption">侧边栏 · 工作区行</p>
+      <p class="note">悬停时右侧依次为：更多 · 工作区目录设置 · 新会话</p>
+      <!--
+        The row is the shell's own markup, class names and all. The button in the
+        middle is NOT written here: boot-sidebar.js calls the plugin's real
+        installWorkspaceRowButtons() against this DOM, so what the screenshot
+        shows is the injection itself.
+      -->
+      <div id="sidebar" data-slot="sidebar.workspaces"></div>
+    </div>
+    <script src="./react.development.js"></script>
+    <script src="./react-dom.development.js"></script>
+    <script src="./harness.js"></script>
+    <script src="./client.js"></script>
+    <script src="./boot-sidebar.js"></script>
+  </body>
+</html>

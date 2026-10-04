@@ -130,18 +130,112 @@ ok('normalizeSettings(): keeps a boolean', host.normalizeSettings({ defaultWorks
 ok('normalizeState(): an older file without settings keeps working', host.normalizeState({ version: 1, workspaces: {} }).settings.defaultWorkspaceEnabled === false)
 ok('normalizeState(): reads a stored setting', host.normalizeState({ version: 1, settings: { defaultWorkspaceEnabled: true }, workspaces: {} }).settings.defaultWorkspaceEnabled === true)
 
-ok('isFeatureEnabledFor(): a normal workspace is always enabled', host.isFeatureEnabledFor({ settings: {}, workspacePath: docsDir, defaultWorkspacePath: workspaceRoot }) === true)
-ok('isFeatureEnabledFor(): the default workspace is disabled by default', host.isFeatureEnabledFor({ settings: {}, workspacePath: workspaceRoot, defaultWorkspacePath: workspaceRoot }) === false)
-ok('isFeatureEnabledFor(): the switch enables the default workspace', host.isFeatureEnabledFor({ settings: { defaultWorkspaceEnabled: true }, workspacePath: workspaceRoot, defaultWorkspacePath: workspaceRoot }) === true)
-ok('isFeatureEnabledFor(): no default workspace means nothing is gated', host.isFeatureEnabledFor({ settings: {}, workspacePath: workspaceRoot, defaultWorkspacePath: null }) === true)
-ok('isFeatureEnabledFor(): path comparison is case-insensitive on Windows', host.isFeatureEnabledFor({ settings: {}, workspacePath: workspaceRoot.toUpperCase(), defaultWorkspacePath: workspaceRoot }) === (process.platform !== 'win32'))
+// --- the per-workspace layer -------------------------------------------------
+ok('emptyState(): carries an empty per-workspace map', Object.keys(state.settings.workspaceEnabled).length === 0)
+ok(
+  'defaultSettings(): hands out a fresh map instead of sharing one',
+  host.defaultSettings().workspaceEnabled !== host.defaultSettings().workspaceEnabled,
+)
+ok('normalizeSettings(): fills in a missing per-workspace map', Object.keys(host.normalizeSettings(undefined).workspaceEnabled).length === 0)
+ok(
+  'normalizeSettings(): keeps boolean overrides',
+  host.normalizeSettings({ workspaceEnabled: { a: true, b: false } }).workspaceEnabled.a === true &&
+    host.normalizeSettings({ workspaceEnabled: { a: true, b: false } }).workspaceEnabled.b === false,
+)
+ok(
+  'normalizeSettings(): drops a non-boolean override rather than guessing',
+  Object.keys(host.normalizeSettings({ workspaceEnabled: { a: 'yes', b: 1, c: null } }).workspaceEnabled).length === 0,
+)
+ok('normalizeSettings(): survives a garbage map', Object.keys(host.normalizeSettings({ workspaceEnabled: 'nope' }).workspaceEnabled).length === 0)
+ok('normalizeState(): an older file without the map keeps working', Object.keys(host.normalizeState({ version: 1, workspaces: {} }).settings.workspaceEnabled).length === 0)
+
+{
+  const off = { workspaceEnabled: { [host.keyOf(docsDir)]: false } }
+  const on = { workspaceEnabled: { [host.keyOf(workspaceRoot)]: true } }
+  ok(
+    'isFeatureEnabledFor(): a normal workspace is always enabled',
+    host.isFeatureEnabledFor({ settings: {}, workspacePath: docsDir, defaultWorkspacePath: workspaceRoot }) === true,
+  )
+  ok(
+    'isFeatureEnabledFor(): the default workspace is disabled by default',
+    host.isFeatureEnabledFor({ settings: {}, workspacePath: workspaceRoot, defaultWorkspacePath: workspaceRoot }) === false,
+  )
+  ok(
+    'isFeatureEnabledFor(): the switch enables the default workspace',
+    host.isFeatureEnabledFor({ settings: { defaultWorkspaceEnabled: true }, workspacePath: workspaceRoot, defaultWorkspacePath: workspaceRoot }) === true,
+  )
+  ok(
+    'isFeatureEnabledFor(): no default workspace means nothing is gated',
+    host.isFeatureEnabledFor({ settings: {}, workspacePath: workspaceRoot, defaultWorkspacePath: null }) === true,
+  )
+  ok(
+    'isFeatureEnabledFor(): path comparison is case-insensitive on Windows',
+    host.isFeatureEnabledFor({ settings: {}, workspacePath: workspaceRoot.toUpperCase(), defaultWorkspacePath: workspaceRoot }) === (process.platform !== 'win32'),
+  )
+  ok(
+    'isFeatureEnabledFor(): a per-workspace override turns a normal workspace OFF',
+    host.isFeatureEnabledFor({ settings: off, workspacePath: docsDir, defaultWorkspacePath: workspaceRoot }) === false,
+  )
+  ok(
+    'isFeatureEnabledFor(): a per-workspace override turns the default workspace ON',
+    host.isFeatureEnabledFor({ settings: on, workspacePath: workspaceRoot, defaultWorkspacePath: workspaceRoot }) === true,
+  )
+  ok(
+    'isFeatureEnabledFor(): an override beats the default-workspace switch in both directions',
+    host.isFeatureEnabledFor({
+      settings: { defaultWorkspaceEnabled: true, workspaceEnabled: { [host.keyOf(workspaceRoot)]: false } },
+      workspacePath: workspaceRoot,
+      defaultWorkspacePath: workspaceRoot,
+    }) === false,
+  )
+  ok(
+    'isFeatureEnabledFor(): an override is matched by the same folding as the store keys',
+    host.isFeatureEnabledFor({ settings: off, workspacePath: docsDir.toUpperCase(), defaultWorkspacePath: workspaceRoot }) === (process.platform !== 'win32'),
+  )
+}
 
 {
   const settingsState = host.emptyState()
   const applied = host.applySettings(settingsState, { defaultWorkspaceEnabled: true })
-  ok('applySettings(): flips the switch', applied.ok === true && settingsState.settings.defaultWorkspaceEnabled === true, applied.message)
+  ok('applySettings(): flips the default-workspace switch', applied.ok === true && settingsState.settings.defaultWorkspaceEnabled === true, applied.message)
   ok('applySettings(): reports the new state in its message', applied.message.includes('启用'), applied.message)
   ok('applySettings(): rejects a non-boolean', host.applySettings(host.emptyState(), { defaultWorkspaceEnabled: 'yes' }).ok === false)
+}
+{
+  const key = host.keyOf(docsDir)
+  const target = host.emptyState()
+  const off = host.applySettings(target, { workspaceEnabled: { [key]: false } })
+  ok('applySettings(): writes a per-workspace override', off.ok === true && target.settings.workspaceEnabled[key] === false, off.message)
+  ok('applySettings(): names the workspace in its message', off.message.includes(key), off.message)
+  ok(
+    'applySettings(): a boolean override is observable through isFeatureEnabledFor()',
+    host.isFeatureEnabledFor({ settings: target.settings, workspacePath: docsDir, defaultWorkspacePath: workspaceRoot }) === false,
+  )
+  const on = host.applySettings(target, { workspaceEnabled: { [key]: true } })
+  ok('applySettings(): flips the same override back on', on.ok === true && target.settings.workspaceEnabled[key] === true, on.message)
+  const cleared = host.applySettings(target, { workspaceEnabled: { [key]: null } })
+  ok(
+    'applySettings(): null restores the workspace default instead of pinning it',
+    cleared.ok === true && !(key in target.settings.workspaceEnabled) && cleared.message.includes('默认'),
+    cleared.message,
+  )
+  ok(
+    'applySettings(): restoring the default is observable through isFeatureEnabledFor()',
+    host.isFeatureEnabledFor({ settings: target.settings, workspacePath: docsDir, defaultWorkspacePath: workspaceRoot }) === true,
+  )
+  ok('applySettings(): rejects a non-boolean override', host.applySettings(host.emptyState(), { workspaceEnabled: { [key]: 'yes' } }).ok === false)
+  ok('applySettings(): rejects a non-object map', host.applySettings(host.emptyState(), { workspaceEnabled: true }).ok === false)
+  ok('applySettings(): rejects an empty patch', host.applySettings(host.emptyState(), {}).ok === false)
+  const untouched = host.emptyState()
+  host.applySettings(untouched, { workspaceEnabled: { [key]: false, other: 'nope' } })
+  ok('applySettings(): a partially invalid patch writes nothing at all', Object.keys(untouched.settings.workspaceEnabled).length === 0)
+  const both = host.emptyState()
+  const mixed = host.applySettings(both, { defaultWorkspaceEnabled: true, workspaceEnabled: { [key]: false } })
+  ok(
+    'applySettings(): one patch can carry both layers',
+    mixed.ok === true && both.settings.defaultWorkspaceEnabled === true && both.settings.workspaceEnabled[key] === false,
+    mixed.message,
+  )
 }
 
 ok('normalizeState(): survives garbage', Object.keys(host.normalizeState('nonsense').workspaces).length === 0)
@@ -369,6 +463,12 @@ ok('route(GET): flags the default workspace', defaultWorkspace?.isDefault === tr
 ok('route(GET): the default workspace is disabled by default', defaultWorkspace?.enabled === false)
 ok('route(GET): every other workspace stays enabled', demoWorkspace?.enabled === true)
 ok('route(GET): publishes the settings block', getPayload.settings?.defaultWorkspaceEnabled === false)
+ok(
+  'route(GET): publishes each workspace\'s settings key',
+  demoWorkspace?.key === host.keyOf(workspaceRoot) && defaultWorkspace?.key === host.keyOf(defaultDir),
+  `${String(demoWorkspace?.key)} / ${String(defaultWorkspace?.key)}`,
+)
+ok('route(GET): publishes an empty per-workspace override map', Object.keys(getPayload.settings?.workspaceEnabled ?? {}).length === 0)
 
 const settingsResponse = fakeResponse()
 await captured.route.handler(fakeRequest('POST', { op: 'settings', settings: { defaultWorkspaceEnabled: true } }), settingsResponse)
@@ -381,6 +481,45 @@ const settingsBack = fakeResponse()
 await captured.route.handler(fakeRequest('POST', { op: 'settings', settings: { defaultWorkspaceEnabled: false } }), settingsBack)
 ok('route(POST settings): can be turned back off', JSON.parse(settingsBack.body).settings?.defaultWorkspaceEnabled === false)
 ok('route(POST settings): rejects a non-boolean', JSON.parse((await (async () => { const r = fakeResponse(); await captured.route.handler(fakeRequest('POST', { op: 'settings', settings: { defaultWorkspaceEnabled: 1 } }), r); return r })()).body).ok === false)
+
+// Turning an ordinarily-enabled workspace OFF through the route has to reach all
+// three surfaces: the snapshot flag, the prompt contribution, and the tool.
+const offResponse = fakeResponse()
+await captured.route.handler(
+  fakeRequest('POST', { op: 'settings', settings: { workspaceEnabled: { [host.keyOf(workspaceRoot)]: false } } }),
+  offResponse,
+)
+const offPayload = JSON.parse(offResponse.body)
+ok('route(POST settings): accepts a per-workspace override', offPayload.ok === true, offPayload.message)
+ok('route(POST settings): the workspace reports itself as disabled', offPayload.workspaces.find((w) => w.id === 'ws-1')?.enabled === false)
+ok('route(POST settings): the override reaches the state file', host.readState(stateFile).settings.workspaceEnabled[host.keyOf(workspaceRoot)] === false)
+ok(
+  'route(POST settings): the prompt contribution stops for that workspace',
+  String(contribution.text({ agent: { session: { header: { cwd: workspaceRoot } } } })) === '',
+)
+ok(
+  'route(POST settings): the tool refuses that workspace and names the settings page',
+  String(await tool.execute({ action: 'list', workspace: workspaceRoot }, {})).includes('设置 → workspace+'),
+)
+ok(
+  'route(POST settings): the override touches only its own workspace',
+  Object.keys(offPayload.settings.workspaceEnabled).length === 1 &&
+    offPayload.workspaces.find((w) => w.id === 'ws-default')?.enabled === false,
+  JSON.stringify(offPayload.settings.workspaceEnabled),
+)
+const onResponse = fakeResponse()
+await captured.route.handler(
+  fakeRequest('POST', { op: 'settings', settings: { workspaceEnabled: { [host.keyOf(workspaceRoot)]: null } } }),
+  onResponse,
+)
+ok(
+  'route(POST settings): null restores the workspace default',
+  JSON.parse(onResponse.body).workspaces.find((w) => w.id === 'ws-1')?.enabled === true,
+)
+ok(
+  'route(POST settings): rejects a malformed override map',
+  JSON.parse((await (async () => { const r = fakeResponse(); await captured.route.handler(fakeRequest('POST', { op: 'settings', settings: { workspaceEnabled: { a: 'yes' } } }), r); return r })()).body).ok === false,
+)
 
 const postResponse = fakeResponse()
 await captured.route.handler(fakeRequest('POST', { op: 'add', workspace: workspaceRoot, label: 'ui', path: docsDir }), postResponse)
@@ -480,8 +619,17 @@ function makeElement(tag) {
     innerHTML: '',
     textContent: '',
     appendChild(child) {
+      return element.insertBefore(child, null)
+    },
+    /** `insertBefore(node, null)` appends, exactly like the DOM. */
+    insertBefore(child, anchor) {
+      if (child.parent !== null) {
+        child.parent.children = child.parent.children.filter((node) => node !== child)
+      }
+      const at = anchor === null || anchor === undefined ? element.children.length : element.children.indexOf(anchor)
+      if (at < 0) element.children.push(child)
+      else element.children.splice(at, 0, child)
       child.parent = element
-      element.children.push(child)
       return child
     },
     remove() {
@@ -646,13 +794,25 @@ const primitives = {
     props.open
       ? React.createElement(
           'div',
-          { className: 'modal', role: 'dialog' },
+          { className: ['modal', props.className].filter(Boolean).join(' '), role: 'dialog', description: props.description },
           props.title,
           props.description,
           props.children,
           props.footer,
         )
       : null,
+  // Like the real tooltip, the bubble only exists while hovered/focused: the label
+  // is exposed on the anchor, never rendered into the dialog's text.
+  Tooltip: (props) =>
+    React.createElement(
+      'span',
+      {
+        className: 'tooltip',
+        'data-side': props.side,
+        'data-tooltip': typeof props.label === 'function' ? props.label() : props.label,
+      },
+      props.children,
+    ),
 }
 const requireStub = (specifier) => {
   if (specifier === 'react') return React
@@ -705,6 +865,18 @@ ok(
 )
 ok('lib/client.js: the stylesheet is namespaced', head.children[0]?.textContent.includes('.dsh-workspace-plus-'))
 ok('lib/client.js: the stylesheet styles the injected row button', head.children[0]?.textContent.includes('.dsh-workspace-plus-rowbtn'))
+{
+  // A client-module reload re-runs the factory in the page that is already open:
+  // the stylesheet must stay a single, CURRENT tag instead of a stale duplicate.
+  head.children[0].textContent = 'stale'
+  registration.factory(requireStub)
+  const tags = head.children.filter((tag) => tag.dataset.pluginCss !== undefined)
+  ok(
+    'lib/client.js: a reload rewrites the one stylesheet instead of duplicating a stale one',
+    tags.length === 1 && String(tags[0].textContent).includes('.dsh-workspace-plus-dialog-card'),
+    `tags=${String(tags.length)}`,
+  )
+}
 {
   // The button must look like the shell's own row actions, whose `.iconButton` is
   // 16x16, transparent, tertiary-colored, and changes only its COLOR on hover.
@@ -778,8 +950,13 @@ rowOne.setAttribute('data-row-key', 'workspace:ws-1')
 container.appendChild(rowOne)
 const actionsOne = fakeDocument.createElement('span')
 rowOne.appendChild(actionsOne)
+// The shell's real action cluster: the 「更多」menu button, then 「新会话」.
 const reactOwned = fakeDocument.createElement('button')
+reactOwned.setAttribute('aria-label', '更多')
 actionsOne.appendChild(reactOwned)
+const reactNewSession = fakeDocument.createElement('button')
+reactNewSession.setAttribute('aria-label', '新会话')
+actionsOne.appendChild(reactNewSession)
 
 const rowUngrouped = fakeDocument.createElement('div')
 rowUngrouped.setAttribute('data-row-key', 'workspace:')
@@ -808,7 +985,24 @@ const injectedOne = actionsOne.children.filter((child) => child.className === cl
 const injectedTwo = actionsTwo.children.filter((child) => child.className === clientExports.ROW_BUTTON_CLASS)
 ok('row buttons: one button per workspace row', injectedOne.length === 1 && injectedTwo.length === 1)
 ok('row buttons: the ungrouped row gets none', actionsUngrouped.children.length === 0)
-ok('row buttons: appended after the shell\'s own actions', actionsOne.children[0] === reactOwned && actionsOne.children[1] === injectedOne[0])
+ok(
+  'row buttons: seats itself between the menu and the new-session button',
+  actionsOne.children[0] === reactOwned && actionsOne.children[1] === injectedOne[0] && actionsOne.children[2] === reactNewSession,
+  actionsOne.children.map((child) => child.getAttribute('aria-label') ?? child.className).join(' | '),
+)
+ok('row buttons: the new-session button stays last', actionsOne.lastElementChild === reactNewSession)
+ok(
+  'row buttons: a cluster with only one child keeps that child last',
+  (() => {
+    const lone = fakeDocument.createElement('span')
+    const only = fakeDocument.createElement('button')
+    lone.appendChild(only)
+    const button = fakeDocument.createElement('button')
+    button.className = clientExports.ROW_BUTTON_CLASS
+    clientExports.seatRowButton(lone, button)
+    return lone.children[0] === only && lone.children[1] === button
+  })(),
+)
 ok('row buttons: the button is labelled for assistive tech', injectedOne[0].getAttribute('aria-label') === clientExports.ROW_BUTTON_LABEL && injectedOne[0].title === clientExports.ROW_BUTTON_LABEL, injectedOne[0].getAttribute('aria-label'))
 ok('row buttons: the button carries an inline glyph', String(injectedOne[0].innerHTML).startsWith('<svg') && String(injectedOne[0].innerHTML).includes('</svg>'))
 ok('row buttons: the glyph uses the shell\'s 16px artwork grid', String(injectedOne[0].innerHTML).includes('viewBox="0 0 16 16"') && String(injectedOne[0].innerHTML).includes('fill="currentColor"'))
@@ -822,12 +1016,23 @@ clientExports.closeWorkdirsDialog()
 
 // A re-render must not duplicate the button, and a removed row must lose it.
 settleDom()
-ok('row buttons: reconciling is idempotent', actionsOne.children.length === 2, String(actionsOne.children.length))
+ok('row buttons: reconciling is idempotent', actionsOne.children.length === 3, String(actionsOne.children.length))
+
+// React re-renders the row without knowing this node exists, so it may shuffle
+// its own children around ours: the seat is re-asserted, not set once.
+actionsOne.insertBefore(injectedOne[0], reactOwned)
+settleDom()
+ok(
+  'row buttons: a displaced button returns to its seat',
+  actionsOne.children[1] === injectedOne[0] && actionsOne.children[0] === reactOwned,
+  actionsOne.children.map((child) => child.getAttribute('aria-label') ?? child.className).join(' | '),
+)
+ok('row buttons: reclaiming the seat never duplicates the button', actionsOne.children.length === 3, String(actionsOne.children.length))
 
 rowTwo.remove()
 settleDom()
 ok('row buttons: a removed row loses its button', injectedTwo[0].parent === null)
-ok('row buttons: the remaining row keeps its button', actionsOne.children.length === 2)
+ok('row buttons: the remaining row keeps its button', actionsOne.children.length === 3)
 
 // The default-Workspace gate. Before any payload the id is unknown, so the row
 // keeps its entry point; once the host reports the workspace as disabled, the
@@ -863,7 +1068,8 @@ installer.refresh()
 ok('default-workspace gate: flipping the switch restores the button without a reload', rowButtonIn(actionsDefault).length === 1)
 
 installer.dispose()
-ok('row buttons: dispose removes every injected button', actionsOne.children.length === 1)
+ok('row buttons: dispose removes every injected button', actionsOne.children.length === 2)
+ok('row buttons: dispose leaves the shell\'s own actions untouched', actionsOne.children[0] === reactOwned && actionsOne.children[1] === reactNewSession)
 ok('row buttons: dispose stops the observer', observers.at(-1)?.disconnected === true)
 
 // A shell whose row DOM changed must fall back instead of leaving no entry point.
@@ -1051,49 +1257,82 @@ ok('hint panel: the control opens the dialog', clientExports.readDialog().open =
 clientExports.closeWorkdirsDialog()
 
 // --- the `workspace+` settings page -----------------------------------------
+const defaultKey = host.keyOf(defaultDir)
+const workspaceKey = host.keyOf(workspaceRoot)
 const settingsSnapshot = {
   ok: true,
   registryAvailable: true,
-  settings: { defaultWorkspaceEnabled: false },
+  settings: { defaultWorkspaceEnabled: false, workspaceEnabled: {} },
   defaultWorkspaceId: 'ws-default',
   defaultWorkspacePath: defaultDir,
   workspaces: [
-    { id: 'ws-default', path: defaultDir, title: '默认工作区', isDefault: true, enabled: false, dirs: [] },
-    { id: 'ws-1', path: workspaceRoot, title: 'demo', isDefault: false, enabled: true, dirs: [] },
+    { id: 'ws-default', key: defaultKey, path: defaultDir, title: '默认工作区', isDefault: true, enabled: false, dirs: [] },
+    { id: 'ws-1', key: workspaceKey, path: workspaceRoot, title: 'demo', isDefault: false, enabled: true, dirs: [] },
   ],
 }
 clientExports.publishHostPayload(settingsSnapshot)
 const settingsTree = render(settingsPage({}))
 const settingsText = collectText(settingsTree)
-ok('settings page: explains the default-workspace switch', settingsText.includes('对默认工作区启用'))
-ok('settings page: says it is off by default', settingsText.includes('默认不启用'))
-ok('settings page: names the current default workspace', settingsText.includes(defaultDir), settingsText.slice(0, 90))
-const switchElement = findElements(settingsTree, (element) => element.props.role === 'switch')[0]
-ok('settings page: renders exactly one switch', findElements(settingsTree, (element) => element.props.role === 'switch').length === 1)
-ok('settings page: the switch reflects the host setting', switchElement?.props['aria-checked'] === false, String(switchElement?.props['aria-checked']))
-ok('settings page: the switch is labelled for assistive tech', switchElement?.props['aria-label'] === '对默认工作区启用')
+const switches = () => findElements(render(settingsPage({})), (element) => element.props.role === 'switch')
+ok('settings page: explains what one switch covers', settingsText.includes('按工作区启用'), settingsText.slice(0, 80))
+ok('settings page: renders one switch per workspace', switches().length === 2, String(switches().length))
+ok('settings page: lists every workspace path', settingsText.includes(defaultDir) && settingsText.includes(workspaceRoot))
+ok('settings page: marks the default workspace', settingsText.includes('默认工作区'))
+ok('settings page: the default workspace switch starts off', switches()[0]?.props['aria-checked'] === false, String(switches()[0]?.props['aria-checked']))
+ok('settings page: every other workspace switch starts on', switches()[1]?.props['aria-checked'] === true, String(switches()[1]?.props['aria-checked']))
+ok(
+  'settings page: switches are labelled per workspace for assistive tech',
+  switches()[0]?.props['aria-label'] === '默认工作区 启用 workspace+',
+  String(switches()[0]?.props['aria-label']),
+)
+ok('settings page: says the switch does not delete labels', settingsText.includes('关掉不会删除已登记的标签'), settingsText.slice(0, 120))
 
-// Flip it: the switch posts one settings op and the shared snapshot follows.
+// Flip the SECOND workspace off: the switch posts one settings op keyed by the
+// host's own workspace key, and the shared snapshot follows.
 fetchCalls.length = 0
 fetchReply = {
   status: 200,
   body: {
     ...settingsSnapshot,
-    message: '已对默认工作区启用 workspace+',
-    settings: { defaultWorkspaceEnabled: true },
+    message: '已停用 ' + workspaceKey + ' 的 workspace+',
+    settings: { defaultWorkspaceEnabled: false, workspaceEnabled: { [workspaceKey]: false } },
     workspaces: [
-      { id: 'ws-default', path: defaultDir, title: '默认工作区', isDefault: true, enabled: true, dirs: [] },
-      { id: 'ws-1', path: workspaceRoot, title: 'demo', isDefault: false, enabled: true, dirs: [] },
+      { id: 'ws-default', key: defaultKey, path: defaultDir, title: '默认工作区', isDefault: true, enabled: false, dirs: [] },
+      { id: 'ws-1', key: workspaceKey, path: workspaceRoot, title: 'demo', isDefault: false, enabled: false, dirs: [] },
     ],
   },
 }
-switchElement.props.onClick()
+switches()[1].props.onClick()
 await new Promise((resolve) => setTimeout(resolve, 0))
-ok('settings page: flipping the switch posts a settings op', fetchCalls.length === 1 && fetchCalls[0].method === 'POST' && String(fetchCalls[0].body).includes('"op":"settings"'), JSON.stringify(fetchCalls[0]?.body))
-ok('settings page: the request carries the new value', String(fetchCalls[0]?.body).includes('"defaultWorkspaceEnabled":true'), String(fetchCalls[0]?.body))
-ok('settings page: the shared snapshot picks up the new value', clientExports.readHostState().settings.defaultWorkspaceEnabled === true)
-const settingsAfter = render(settingsPage({}))
-ok('settings page: the switch re-renders as on', findElements(settingsAfter, (element) => element.props.role === 'switch')[0]?.props['aria-checked'] === true)
+ok(
+  'settings page: flipping a switch posts a settings op',
+  fetchCalls.length === 1 && fetchCalls[0].method === 'POST' && String(fetchCalls[0].body).includes('"op":"settings"'),
+  JSON.stringify(fetchCalls[0]?.body),
+)
+{
+  const body = JSON.parse(String(fetchCalls[0]?.body))
+  ok(
+    'settings page: the request addresses the workspace by the key the host published',
+    body?.settings?.workspaceEnabled?.[workspaceKey] === false &&
+      Object.keys(body.settings.workspaceEnabled).length === 1,
+    String(fetchCalls[0]?.body),
+  )
+  ok('settings page: the request never guesses a key from the path', !String(fetchCalls[0]?.body).includes('"undefined"'), String(fetchCalls[0]?.body))
+}
+ok('settings page: the shared snapshot picks up the override', clientExports.readHostState().settings.workspaceEnabled[workspaceKey] === false)
+ok('settings page: the switch re-renders as off', switches()[1]?.props['aria-checked'] === false, String(switches()[1]?.props['aria-checked']))
+
+// A host that predates the per-workspace layer answers without keys: the page
+// must say so instead of posting a switch nobody can address.
+clientExports.publishHostPayload({
+  ...settingsSnapshot,
+  workspaces: settingsSnapshot.workspaces.map(({ key, ...rest }) => rest),
+})
+const keylessText = collectText(render(settingsPage({})))
+ok('settings page: reports a host that publishes no workspace keys', keylessText.includes('没有 key'), keylessText.slice(0, 80))
+ok('settings page: disables the switches it cannot address', switches().every((element) => element.props.disabled === true))
+clientExports.publishHostPayload(settingsSnapshot)
+fetchReply = { status: 200, body: settingsSnapshot }
 
 fetchReply = { status: 500, body: { ok: false } }
 const failedTree = render(settingsPage({ initial: { status: 'error', message: 'host responded 500', ok: null, busy: false } }))
@@ -1124,12 +1363,56 @@ const openTree = render(dialog({ initial: readyState }))
 const openText = collectText(openTree)
 ok('dialog: opens as a modal surface', findElements(openTree, (element) => element.props.role === 'dialog').length === 1)
 ok('dialog: titles itself', openText.includes('工作区目录设置'))
-ok('dialog: explains the label contract', openText.includes('标签') && openText.includes('绝对路径'))
+const openSurface = findElements(openTree, (element) => element.props.role === 'dialog')[0]
+ok(
+  'dialog: asks the shell for a wider card than the 380px default',
+  openSurface?.props.className.includes('dsh-workspace-plus-dialog-card'),
+  openSurface?.props.className,
+)
+{
+  const css = String(head.children[0]?.textContent ?? '')
+  const rule = css.match(/\.dsh-workspace-plus-dialog-card\.dsh-workspace-plus-dialog-card\{([^}]*)\}/)?.[1] ?? ''
+  // Two classes beat the shell's own single-class `.dialog` rule whatever the
+  // stylesheet order turns out to be.
+  ok('dialog CSS: widens the card', rule.includes('width:min(760px,100%)'), rule)
+}
+ok('dialog: drops the modal description paragraph', openSurface?.props.description === undefined, String(openSurface?.props.description))
+ok(
+  'dialog: drops the trailing sandbox footnote',
+  !openText.includes('一个工作区可以登记') && !openText.includes('标签映射会自动注入') && !openText.includes('这里会把这类目录标注出来'),
+  openText.slice(0, 80),
+)
 ok('dialog: lists every registered label', readyState.workspaces[0].dirs.every((dir) => openText.includes(dir.label)))
 ok('dialog: shows every absolute path', readyState.workspaces[0].dirs.every((dir) => openText.includes(dir.path)))
-ok('dialog: marks directories outside the workspace root', openText.includes('工作区根目录之外'))
+{
+  // Outside the workspace root the row carries the shell's shield, and the
+  // explanation is the tooltip's payload rather than row copy.
+  const badges = findElements(openTree, (element) => element.props['data-tooltip'] !== undefined)
+  const labels = badges.map((badge) => String(badge.props['data-tooltip']))
+  // This fixture keeps both directories beside the workspace root, so every row
+  // earns a badge — the count is derived, not hard-coded.
+  const outsideCount = readyState.workspaces[0].dirs.filter((dir) => clientExports.isOutside(workspaceRoot, dir.path)).length
+  ok('dialog: badges exactly the directories outside the workspace root', outsideCount > 0 && badges.length === outsideCount, `${String(badges.length)} of ${String(outsideCount)}`)
+  ok(
+    'dialog: the badge explains itself through a tooltip',
+    labels[0]?.includes('工作区根目录之外') && labels[0]?.includes('danger-full-access'),
+    labels[0],
+  )
+  ok('dialog: the badge cannot be hover-only', findElements(badges[0] ?? {}, (element) => element.props.tabIndex === 0).length === 1)
+  ok('dialog: the warning is not spelled out in the row', !openText.includes('工作区根目录之外'), openText.slice(0, 100))
+  const shield = findElements(badges[0] ?? {}, (element) => element.type === 'svg')[0]
+  ok('dialog: the badge draws a shield glyph', shield !== undefined && String(shield?.children?.[0]?.props?.d ?? '').startsWith('M6.80132'))
+}
 ok('dialog: offers one remove control per directory', findElements(openTree, (element) => element.type === 'button').filter((b) => collectText(b) === '删除').length === 2)
-ok('dialog: renders the add form inputs', findElements(openTree, (element) => element.type === 'input').length === 3)
+const openInputs = findElements(openTree, (element) => element.type === 'input')
+ok('dialog: renders label and note, with no path input', openInputs.length === 2, String(openInputs.length))
+ok(
+  'dialog: keeps label and note on one row',
+  openInputs.every((input) => input.props.className.includes('dsh-workspace-plus-input')) &&
+    openInputs.filter((input) => input.props.className.includes('dsh-workspace-plus-input-label')).length === 1 &&
+    openInputs.filter((input) => input.props.className.includes('dsh-workspace-plus-input-note')).length === 1,
+  openInputs.map((input) => input.props.className).join(' | '),
+)
 ok('dialog: locks onto the triggering workspace — no picker', findElements(openTree, (element) => element.type === 'select').length === 0)
 ok('dialog: names the locked workspace', openText.includes('demo') && openText.includes(workspaceRoot), openText.slice(0, 80))
 const unlockedTree = render(dialog({ initial: { ...readyState, locked: false } }))
@@ -1139,6 +1422,11 @@ const dialogButtons = findElements(openTree, (element) => element.type === 'butt
 ok('dialog: offers a refresh and a done control', dialogButtons.some((b) => collectText(b) === '刷新') && dialogButtons.some((b) => collectText(b) === '完成'))
 const addButton = dialogButtons.find((b) => collectText(b) === '添加')
 ok('dialog: renders the add control', addButton !== undefined && typeof addButton.props.onClick === 'function')
+{
+  // Nothing is addable before a directory is chosen: the path field is the only
+  // source of a path now.
+  ok('dialog: the add control waits for a chosen directory', addButton?.props.disabled === true, String(addButton?.props.disabled))
+}
 let addClickError = null
 try {
   addButton?.props.onClick()
@@ -1146,6 +1434,28 @@ try {
   addClickError = error
 }
 ok('dialog: the add control click handler runs', addClickError === null, addClickError?.message)
+{
+  // The path control sits above the label row, as a control rather than an input.
+  const pathControl = dialogButtons.find((b) => b.props['aria-label'] === '选择目录')
+  const labelInput = openInputs.find((input) => input.props.className.includes('dsh-workspace-plus-input-label'))
+  ok('dialog: the path control is a button, not a field', pathControl !== undefined)
+  ok('dialog: the path control is not a text input', findElements(openTree, (element) => element.type === 'input' && element.props['aria-label'] === '目录绝对路径').length === 0)
+  const order = []
+  const walk = (node) => {
+    if (node === null || node === undefined || typeof node !== 'object') return
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child)
+      return
+    }
+    order.push(node)
+    walk(node.children)
+  }
+  walk(openTree)
+  const pathAt = order.indexOf(pathControl)
+  const labelAt = order.indexOf(labelInput)
+  ok('dialog: the path control stands on the line above the label', pathAt >= 0 && labelAt >= 0 && pathAt < labelAt, `${String(pathAt)} < ${String(labelAt)}`)
+  ok('dialog: the path control shows its prompt until a directory is picked', collectText(pathControl) === '选择目录…', collectText(pathControl))
+}
 const inputs = findElements(openTree, (element) => element.type === 'input' && typeof element.props.onChange === 'function')
 let inputError = null
 try {
@@ -1153,7 +1463,7 @@ try {
 } catch (error) {
   inputError = error
 }
-ok('dialog: every input accepts typing', inputs.length === 3 && inputError === null, inputError?.message)
+ok('dialog: every input accepts typing', inputs.length === 2 && inputError === null, inputError?.message)
 const removeButton = dialogButtons.find((b) => collectText(b) === '删除')
 let removeError = null
 try {
@@ -1211,15 +1521,17 @@ ok('draftAfterPick(): keeps the note', pickedDraft.note === 'n')
 ok('draftAfterPick(): never overwrites a typed label', clientExports.draftAfterPick({ ...emptyDraft, label: 'api' }, 'D:\\proj\\backend').label === 'api')
 ok('draftAfterPick(): leaves the label empty when nothing is suggestible', clientExports.draftAfterPick(emptyDraft, 'D:\\项目').label === '', clientExports.draftAfterPick(emptyDraft, 'D:\\项目').label)
 
-// The browse control is real DOM-reachable markup: render the dialog with a
-// ready state and drive it through the picker double.
+// The path control is real DOM-reachable markup: render the dialog with a ready
+// state and drive it through the picker double.
 pickerReply = { kind: 'path', value: 'D:\\proj\\backend' }
 pickerCalls = 0
 clientExports.openWorkdirsDialog('ws-1')
 const browseTree = render(dialog({ initial: readyState }))
-const browseButton = findElements(browseTree, (element) => element.type === 'button').find((b) => collectText(b) === '浏览…')
-ok('dialog: renders a browse control next to the path', browseButton !== undefined)
-ok('dialog: the browse control is enabled while row buttons work', browseButton?.props.disabled === false, String(browseButton?.props.disabled))
+const browseButton = findElements(browseTree, (element) => element.type === 'button').find(
+  (b) => b.props['aria-label'] === '选择目录',
+)
+ok('dialog: renders the directory picker as the path field itself', browseButton !== undefined)
+ok('dialog: the picker is enabled while row buttons work', browseButton?.props.disabled === false, String(browseButton?.props.disabled))
 let browseError = null
 try {
   browseButton?.props.onClick()
@@ -1227,15 +1539,19 @@ try {
   browseError = error
 }
 await new Promise((resolve) => setTimeout(resolve, 0))
-ok('dialog: the browse control asks the shell picker', pickerCalls === 1, String(pickerCalls))
-ok('dialog: the browse control does not throw', browseError === null, browseError?.message)
+ok('dialog: clicking the path field asks the shell picker', pickerCalls === 1, String(pickerCalls))
+ok('dialog: the picker does not throw', browseError === null, browseError?.message)
 
 // A cancelled picker returns null and must stay silent.
 pickerReply = { kind: 'path', value: null }
 pickerCalls = 0
 browseButton?.props.onClick()
 await new Promise((resolve) => setTimeout(resolve, 0))
-ok('dialog: a cancelled pick changes nothing and reports nothing', pickerCalls === 1 && collectText(render(dialog({ initial: readyState }))).includes('浏览'), String(pickerCalls))
+ok(
+  'dialog: a cancelled pick changes nothing and reports nothing',
+  pickerCalls === 1 && collectText(render(dialog({ initial: readyState }))).includes('选择目录'),
+  String(pickerCalls),
+)
 
 // A failed picker must surface a reason rather than failing silently.
 pickerReply = { kind: 'throw', value: 'picker unavailable' }
@@ -1258,18 +1574,27 @@ pickerReply = { kind: 'path', value: null }
 clientExports.closeWorkdirsDialog()
 
 // A composition without ui-workspace must keep working: the plugin still loads,
-// the browse control just disables itself.
+// and the dialog says why it cannot take a path instead of failing silently.
 const pickerEffect = first.effects.find((effect) => effect.label.includes('directory picker'))
 ok('client apply(): owns the picker through a disposable effect', pickerEffect !== undefined, first.effects.map((e) => e.label).join(' | '))
 pickerEffect?.dispose()
 clientExports.openWorkdirsDialog('ws-1')
 const noPickerTree = render(dialog({ initial: readyState }))
-const noPickerButton = findElements(noPickerTree, (element) => element.type === 'button').find((b) => collectText(b).startsWith('浏览'))
-ok('dialog: the browse control disables itself when no picker is mounted', noPickerButton !== undefined && noPickerButton.props.disabled === true, String(noPickerButton?.props.disabled))
+const noPickerButton = findElements(noPickerTree, (element) => element.type === 'button').find(
+  (b) => b.props['aria-label'] === '选择目录',
+)
+ok('dialog: the picker disables itself when no picker is mounted', noPickerButton !== undefined && noPickerButton.props.disabled === true, String(noPickerButton?.props.disabled))
+ok(
+  'dialog: the disabled picker names the tool to use instead',
+  String(noPickerButton?.props.title ?? '').includes('workspace_dirs'),
+  String(noPickerButton?.props.title),
+)
+const noPickerAdd = findElements(noPickerTree, (element) => element.type === 'button').find((b) => collectText(b) === '添加')
+ok('dialog: the add control stays disabled without a path', noPickerAdd?.props.disabled === true, String(noPickerAdd?.props.disabled))
 const noPickerCalls = pickerCalls
 noPickerButton?.props.onClick()
 await new Promise((resolve) => setTimeout(resolve, 0))
-ok('dialog: a disabled browse control never calls a missing picker', pickerCalls === noPickerCalls, String(pickerCalls))
+ok('dialog: a disabled picker never calls a missing picker', pickerCalls === noPickerCalls, String(pickerCalls))
 clientExports.closeWorkdirsDialog()
 
 // ---------------------------------------------------------------------------

@@ -3,3 +3,13 @@ node_modules/
 *.tgz
 *.log
 .DS_Store
+
+# tools/preview: the harness is committed, the shell assets it renders against
+# are extracted from the local DSH install (see tools/preview/README.md).
+tools/preview/client.js
+tools/preview/react.development.js
+tools/preview/react-dom.development.js
+tools/preview/shell.css
+tools/preview/vendor.css
+tools/preview/theme.css
+tools/preview/rows.css
