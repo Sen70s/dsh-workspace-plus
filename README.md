@@ -327,19 +327,19 @@ dsh plugin --profile desktop remove dsh-workspace-plus
 
 把鼠标停在左侧边栏的任意一个工作区上，那一行的右边会浮出三个小东西。头一个是「更多」，末尾一个是「新会话」，中间那个文件夹，是本插件的。
 
-![工作区行上的目录按钮](docs/row-button.png)
+![工作区行上的目录按钮](https://raw.githubusercontent.com/Sen70s/dsh-workspace-plus/main/docs/row-button.png)
 
 它排在中间，不是末尾 —— 末尾那个位置是壳层的，我不去占。人有各人的座位，插件也一样。
 
 点它，「工作区目录设置」就开出来了：
 
-![工作区目录设置弹窗](docs/dialog-default.png)
+![工作区目录设置弹窗](https://raw.githubusercontent.com/Sen70s/dsh-workspace-plus/main/docs/dialog-default.png)
 
 表格里是已经登记过的目录，一行一个：标签、绝对路径、说明，如此而已。若某个目录在工作区根目录之外，行尾会立一个小小的黄盾牌 —— 这个下面再讲。
 
 **路径是不用手打的。** 表单最上头那个带文件夹图标的格子，它本身就是个按钮。点它，系统的目录选择器就开了：
 
-![选好目录之后，路径与标签都填上了](docs/dialog-picked.png)
+![选好目录之后，路径与标签都填上了](https://raw.githubusercontent.com/Sen70s/dsh-workspace-plus/main/docs/dialog-picked.png)
 
 选中之后，路径落进格子里；标签若还空着，便从目录名里猜一个（`D:\proj\my api` → `my-api`；纯中文的目录名不猜，因为宿主不收，猜了也是白猜）。再补一句说明，点「添加」，完事。标签和说明占同一行，路径在它们上面那一行 —— 三样东西原本挤作一处，那是我的不是。
 
@@ -347,7 +347,7 @@ dsh plugin --profile desktop remove dsh-workspace-plus
 
 目录若在工作区根目录之外，它就立在那里，不写字。非得你把鼠标放上去，或者用键盘 Tab 把它聚焦了，它才开口：
 
-![盾牌图标的浮层提示](docs/dialog-tooltip.png)
+![盾牌图标的浮层提示](https://raw.githubusercontent.com/Sen70s/dsh-workspace-plus/main/docs/dialog-tooltip.png)
 
 说的是：DSH 的沙箱只认工作区根目录这一个可写根；会话权限不是 `danger-full-access` 的时候，根目录之外只能读，要写就得逐次批准。这不是插件不肯通融，是它本来就只有这一条路。
 
@@ -357,7 +357,7 @@ dsh plugin --profile desktop remove dsh-workspace-plus
 
 设置 → `workspace+`：
 
-![设置页里按工作区的开关](docs/settings.png)
+![设置页里按工作区的开关](https://raw.githubusercontent.com/Sen70s/dsh-workspace-plus/main/docs/settings.png)
 
 一个工作区一行，一行一个开关。这个开关管三件事：那一行的目录按钮出不出现、标签表注不注入这个工作区的对话、`workspace_dirs` 认不认这个工作区。
 
