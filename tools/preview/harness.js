@@ -17,18 +17,20 @@ const { createElement: h, Fragment } = React
 const clsx = (...values) => values.filter(Boolean).join(' ')
 
 // Class names the shell's build generated for the primitives' CSS modules. Vite
-// names them `_<block>_<hash>_<line>`, leading underscore included.
+// names them `_<block>_<hash>_<line>`, leading underscore included. These change
+// per DSH build: re-derive them from the fresh `shell.css` (list-classes.mjs) and
+// against the class maps in the shell's JS bundle — see README.md.
 const MODAL = {
-  root: '_root_17i0t_6',
-  mask: '_mask_17i0t_18',
-  dialog: '_dialog_17i0t_33',
-  content: '_content_17i0t_62',
-  header: '_header_17i0t_70',
-  title: '_title_17i0t_78',
-  close: '_close_17i0t_86',
-  description: '_description_17i0t_105',
-  body: '_body_17i0t_114',
-  footer: '_footer_17i0t_122',
+  root: '_root_o6lrb_6',
+  mask: '_mask_o6lrb_18',
+  dialog: '_dialog_o6lrb_33',
+  content: '_content_o6lrb_63',
+  header: '_header_o6lrb_71',
+  title: '_title_o6lrb_79',
+  close: '_close_o6lrb_87',
+  description: '_description_o6lrb_106',
+  body: '_body_o6lrb_115',
+  footer: '_footer_o6lrb_123',
 }
 const BUTTON = {
   button: '_button_1rv3m_2',
@@ -39,8 +41,8 @@ const BUTTON = {
   outline: '_outline_1rv3m_54',
   icon: '_icon_1rv3m_71',
 }
-const TOOLTIP = { bubble: '_bubble_ugtpz_1', label: '_label_ugtpz_26' }
-const SWITCH = { switch: '_switch_15ung_5', thumb: '_thumb_15ung_33' }
+const TOOLTIP = { bubble: '_bubble_12mhf_1', label: '_label_12mhf_27' }
+const SWITCH = { switch: '_switch_1ik0f_5', thumb: '_thumb_1ik0f_33' }
 
 /** The primitives' Switch, markup-for-markup. */
 function Switch({ checked, onChange, label, disabled = false, title, className }) {

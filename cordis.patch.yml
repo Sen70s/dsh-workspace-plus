@@ -2,15 +2,52 @@
 #
 # This file is the package's `dsh.bundle.patch` layer: a top-level YAML array of
 # loader patch entries, applied when a profile lists `dsh-workspace-plus` in
-# `dsh.profile.bundles`. The `insert` list appends one loader row; `name` is the
-# package name (never a relative source path), because the profile resolves it
-# through Node module resolution from the profile directory.
+# `dsh.profile.bundles`. The `insert` list appends loader rows; `name` is the
+# module specifier the profile resolves through Node module resolution from the
+# profile directory — the package name for the package-root row, and the
+# package's `./notice` export for the notice sub-feature row.
 #
-# The row is a dual-face plugin: the Node half (exports "." -> lib/index.js)
-# runs in the host process, and the browser half (exports "./client" ->
-# lib/client.js) loads in the web GUI because package.json declares `dsh.client`.
-# The browser half is what adds the directory button and the workspace+
-# settings section.
+# Two rows, two switchable sub-features. The DSH plugin page renders each row
+# under this bundle's card with its own enable/disable switch (the same shape
+# dsh-ops ships `dsh-ops/shell` and `dsh-ops/file` in):
+#
+#   workspaceplus  the original dual-face feature: the Node half
+#                  (exports "." -> lib/index.js) runs in the host process —
+#                  store, context injection, workspace_dirs tool, HTTP route —
+#                  and the browser half (exports "./client" -> lib/client.js)
+#                  adds the directory dialog, the workspace-row buttons, the `@`
+#                  source and the workspace+ settings page.
+#
+#   notice         the Windows-notification sub-feature merged from dsh-notice
+#                  (exports "./notice" -> lib/notice/index.js). Node half only:
+#                  it watches approval/question/turn-end/agent-error events and
+#                  raises Windows toasts; its settings page and click-to-open
+#                  poll ride in the shared browser half, which serves them
+#                  regardless and degrades silently when this row is off.
+#
+# Turning one row off removes exactly that half from the host while the bundle
+# and the other sub-feature keep working. The 通知 settings page also carries a
+# runtime "启用桌面通知" switch, so notifications can be silenced without
+# touching the row at all.
 - insert:
     - id: workspaceplus
       name: 'dsh-workspace-plus'
+    - id: notice
+      name: 'dsh-workspace-plus/notice'
+      # config:                      # deployment defaults for the notification
+      #   enabled: true              # sub-feature; every key is a default the
+      #   scope: roots               # 通知 settings page can still override.
+      #   roots = 只通知我打开的对话, all = 包括子代理与队友
+      #   sound: true
+      #   duration: short            # short | long
+      #   appId: ''                  # 留空则自动选择（优先 DeepSeek Harness 的 AUMID）
+      #   scheme: dsh-notice
+      #   registerProtocol: true
+      #   focusOnClick: true
+      #   minTurnMs: 0               # 短于该时长的“任务完成”不通知，0 = 全部通知
+      #   kinds:
+      #     approval: true           # 请求权限
+      #     question: true           # 询问用户
+      #     done: true               # 任务完成
+      #     aborted: true            # 任务中断
+      #     error: true              # 任务出错

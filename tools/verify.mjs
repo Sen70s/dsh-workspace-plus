@@ -85,8 +85,18 @@ const insertedIds = [...patch.matchAll(/^\s*(?:-\s*)?id:\s*['"]?([^'"\n#]+?)['"]
 
 ok('cordis.patch.yml: contains an insert list', /^-\s*insert:\s*$/m.test(patch))
 ok('cordis.patch.yml: has no tab indentation', !/^\t/m.test(patch))
-ok('cordis.patch.yml: inserts exactly one row by package name', insertedNames.length === 1 && insertedNames[0] === pkg.name, insertedNames.join(', '))
-ok('cordis.patch.yml: the row has a unique id', insertedIds.length === 1 && insertedIds[0].length > 0, insertedIds.join(', '))
+// Two rows, two switchable sub-features: the package-root workspace+ row and the
+// ported notice sub-feature (dsh-notice merged in as `./notice`).
+ok(
+  'cordis.patch.yml: inserts exactly the two sub-feature rows by name',
+  insertedNames.length === 2 && insertedNames[0] === pkg.name && insertedNames[1] === `${pkg.name}/notice`,
+  insertedNames.join(', '),
+)
+ok(
+  'cordis.patch.yml: the rows have the stable ids workspaceplus and notice',
+  insertedIds.length === 2 && insertedIds[0] === 'workspaceplus' && insertedIds[1] === 'notice',
+  insertedIds.join(', '),
+)
 
 // ---------------------------------------------------------------------------
 // 3. Host half — pure store logic
@@ -578,6 +588,102 @@ ok(
 )
 
 // ---------------------------------------------------------------------------
+// 4.5 The notice sub-feature — host half (ported from dsh-notice)
+// ---------------------------------------------------------------------------
+// The `notice` loader row resolves to `lib/notice/index.js`. It must keep the
+// dsh-notice contracts: same routes, same store, same settings normalization,
+// and the same observer-only event shape (the two waterfall listeners are
+// PREPENDED, or the shipped remote forwarder would starve them).
+const noticeHost = await import(pathToFileURL(join(ROOT, 'lib/notice/index.js')).href)
+const noticeFormat = await import(pathToFileURL(join(ROOT, 'lib/notice/format.js')).href)
+const noticeSettings = await import(pathToFileURL(join(ROOT, 'lib/notice/settings.js')).href)
+
+ok('lib/notice/index.js: exports the row module name', noticeHost.name === 'dsh-workspace-plus/notice', noticeHost.name)
+ok('lib/notice/index.js: exports apply()', typeof noticeHost.apply === 'function')
+// Route paths are kept byte-identical to dsh-notice 0.2.1, so an in-place
+// upgrade preserves the protocol scheme, the registry command and the store.
+ok('lib/notice/index.js: keeps the dsh-notice API path', noticeHost.API_PATH === '/dsh-notice/api', noticeHost.API_PATH)
+ok('lib/notice/index.js: keeps the dsh-notice open path', noticeHost.OPEN_PATH === '/dsh-notice/api/open', noticeHost.OPEN_PATH)
+ok('lib/notice/index.js: keeps the dsh-notice pending path', noticeHost.PENDING_PATH === '/dsh-notice/api/pending', noticeHost.PENDING_PATH)
+ok('lib/notice/index.js: imports only Node builtins and sibling modules', !/^\s*import\s[^\n]*from\s+'(?!node:|\.\/)/m.test(read('lib/notice/index.js')))
+ok('lib/notice/package.json: declares its own name and icon', (() => {
+  const sub = JSON.parse(read('lib/notice/package.json'))
+  return typeof sub.name === 'string' && sub.name.length > 0 && typeof sub.icon === 'string' && sub.icon.startsWith('./')
+})())
+ok('lib/notice/locale: ships zh + en display metadata', existsSync(join(ROOT, 'lib/notice/locale/zh.json')) && existsSync(join(ROOT, 'lib/notice/locale/en.json')))
+for (const lang of ['zh', 'en']) {
+  const dict = JSON.parse(read(`lib/notice/locale/${lang}.json`))
+  ok(`lib/notice/locale/${lang}.json: meta.title and meta.description are non-empty`, typeof dict.meta?.title === 'string' && dict.meta.title.length > 0 && typeof dict.meta?.description === 'string' && dict.meta.description.length > 0)
+}
+
+// Pure behaviour: the settings normalization and the wording layer.
+{
+  const defaults = noticeSettings.normalizeSettings({})
+  ok('notice settings: normalize fills every default kind', noticeSettings.KINDS.every((kind) => defaults.kinds[kind] === true), JSON.stringify(defaults.kinds))
+  ok('notice settings: defaults to root scope with sound', defaults.scope === 'roots' && defaults.sound === true && defaults.enabled === true)
+  ok('notice settings: overrides merge one level deep', noticeSettings.normalizeSettings({ kinds: { done: false } }).kinds.done === false)
+  ok('notice settings: the store lives under notice/', noticeSettings.storePath({ DSH_HOME: work }) === join(work, 'notice', 'settings.json'))
+  const descriptor = noticeFormat.describeApproval({ info: { title: '重构登录流程', cwd: 'D:\\work', id: 's1' }, toolName: 'Bash', reason: '写入项目目录' })
+  ok('notice format: an approval descriptor carries kind/title/session', descriptor.kind === 'approval' && descriptor.title === '需要你确认权限' && descriptor.session === '重构登录流程')
+  const turnEnd = noticeFormat.describeTurnEnd({ info: { title: '', cwd: 'D:\\work\\demo', id: 's2' }, reason: { kind: 'completed' }, durationMs: 4200 })
+  ok('notice format: a completed turn falls back to the directory name and reports duration', turnEnd.kind === 'done' && turnEnd.session === 'demo' && turnEnd.detail.includes('用时 4 秒'))
+  ok('notice format: a forked turn is never announced', noticeFormat.describeTurnEnd({ info: {}, reason: { kind: 'forked' } }) === null)
+}
+
+// Wired behaviour: run the notice host half against a fake Cordis context and
+// assert the observer shape and the three routes — the contracts the plugin
+// page's row switch relies on when it toggles this sub-feature.
+{
+  const noticeCaptured = { routes: new Map(), listeners: new Map(), effects: [], warns: [] }
+  const noticeCtx = {
+    logger: { warn: (error) => noticeCaptured.warns.push(String(error)), info: () => {} },
+    get: (key) => (key === 'connection' ? undefined : undefined),
+    on(event, handler, options) {
+      noticeCaptured.listeners.set(event, { handler, options })
+    },
+    effect(fn, label) {
+      noticeCaptured.effects.push(label)
+      return fn()
+    },
+    inject(deps, callback) {
+      if (deps.includes('webServer')) {
+        callback({
+          effect: (fn) => fn(),
+          webServer: {
+            register: (route) => {
+              noticeCaptured.routes.set(route.path, route.handler)
+              return () => {}
+            },
+          },
+        })
+      }
+    },
+  }
+  let noticeApplyError = null
+  try {
+    noticeHost.apply(noticeCtx, { registerProtocol: false, sound: false })
+  } catch (error) {
+    noticeApplyError = error
+  }
+  ok('notice host: apply() registers without throwing', noticeApplyError === null, noticeApplyError?.message)
+  ok('notice host: registers all three routes', [...noticeCaptured.routes.keys()].sort().join('|') === ['/dsh-notice/api', '/dsh-notice/api/open', '/dsh-notice/api/pending'].sort().join('|'), [...noticeCaptured.routes.keys()].join(', '))
+  ok('notice host: subscribes to every monitored event', ['approval/request', 'user-questions/request', 'session/event', 'agent/error', 'session/disposed'].every((event) => noticeCaptured.listeners.has(event)), [...noticeCaptured.listeners.keys()].join(', '))
+  ok(
+    'notice host: both waterfall observers are PREPENDED, or the remote forwarder would starve them',
+    noticeCaptured.listeners.get('approval/request')?.options?.prepend === true &&
+      noticeCaptured.listeners.get('user-questions/request')?.options?.prepend === true,
+  )
+  const approvalListener = noticeCaptured.listeners.get('approval/request')?.handler
+  let delegatedToNext = false
+  const outcome = await approvalListener({ agent: { session: { id: 'notice-verify', header: { cwd: workspaceRoot } } }, toolName: 'Bash', reason: 'verify' }, async () => {
+    delegatedToNext = true
+    return 'decision'
+  })
+  ok('notice host: the approval observer delegates the decision unchanged', delegatedToNext === true && outcome === 'decision')
+  ok('notice host: the pending-open intent expires', noticeHost.PENDING_PATH !== undefined)
+}
+
+// ---------------------------------------------------------------------------
 // 5. Browser half — script form, loader registration, module requests
 // ---------------------------------------------------------------------------
 const clientSource = read(pkg.exports['./client'].default)
@@ -618,6 +724,31 @@ function makeElement(tag) {
     title: '',
     innerHTML: '',
     textContent: '',
+    /** Faithful enough for the row button's switch marker, which toggles a class. */
+    classList: {
+      contains(name) {
+        return String(element.className)
+          .split(/\s+/)
+          .filter(Boolean)
+          .includes(name)
+      },
+      add(name) {
+        if (this.contains(name)) return
+        element.className = element.className === '' ? name : element.className + ' ' + name
+      },
+      remove(name) {
+        element.className = String(element.className)
+          .split(/\s+/)
+          .filter((part) => part !== '' && part !== name)
+          .join(' ')
+      },
+      toggle(name, force) {
+        const on = force === undefined ? !this.contains(name) : force === true
+        if (on) this.add(name)
+        else this.remove(name)
+        return on
+      },
+    },
     appendChild(child) {
       return element.insertBefore(child, null)
     },
@@ -640,6 +771,15 @@ function makeElement(tag) {
     },
     get lastElementChild() {
       return element.children.length === 0 ? null : element.children[element.children.length - 1]
+    },
+    get parentElement() {
+      return element.parent
+    },
+    get nextElementSibling() {
+      const parent = element.parent
+      if (parent === null) return null
+      const at = parent.children.indexOf(element)
+      return at === -1 ? null : parent.children[at + 1] ?? null
     },
     getAttribute(name) {
       return Object.prototype.hasOwnProperty.call(element.attrs, name) ? element.attrs[name] : null
@@ -757,6 +897,12 @@ ok('lib/client.js: registers exactly one module factory', registrations.length =
 const registration = registrations[0]
 ok('lib/client.js: the loader id matches the package name', registration?.id === pkg.name, registration?.id)
 
+/**
+ * Opt-in hook cells. `useState` stays a stateless no-op unless a session is
+ * active, which is what every assertion outside `renderWithHooks` expects.
+ */
+let hookCells = null
+
 /** Minimal React: enough to run the plugin's function components for real. */
 const React = {
   createElement(type, props, ...children) {
@@ -768,6 +914,19 @@ const React = {
     return { type, props: merged, children: flat }
   },
   useState(initial) {
+    // The setter closes over the session, not the module variable: a handler may
+    // run after the render that created it (the picker's await does exactly that).
+    const session = hookCells
+    if (session !== null) {
+      const at = session.index++
+      if (!(at in session.values)) session.values[at] = typeof initial === 'function' ? initial() : initial
+      return [
+        session.values[at],
+        (next) => {
+          session.values[at] = typeof next === 'function' ? next(session.values[at]) : next
+        },
+      ]
+    }
     return [typeof initial === 'function' ? initial() : initial, () => {}]
   },
   useEffect() {},
@@ -845,6 +1004,52 @@ const render = (node) => {
   return { ...node, children: (node.children ?? []).map(render).filter((child) => child !== null) }
 }
 
+/**
+ * Render one component with a real hook cell store, so state it keeps to itself
+ * (the dialog's draft) can be driven the way the browser drives it: call a
+ * handler, then render again with the same cells. Plain `render()` stays
+ * stateless, which is what every other assertion expects.
+ *
+ * @param component - the function component under test.
+ * @param props - its props.
+ * @param cells - the cells from a previous call, to continue that session.
+ * @returns the rendered tree plus the cells to pass to the next call.
+ */
+const renderWithHooks = (component, props, cells = { values: [], index: 0 }) => {
+  hookCells = cells
+  cells.index = 0
+  let tree
+  try {
+    tree = component(props)
+  } finally {
+    hookCells = null
+  }
+  return { tree: render(tree), cells }
+}
+
+/** Class-token helpers: the dialog's contract is written in class names. */
+const classList = (element) => String(element?.props?.className ?? '').split(/\s+/).filter(Boolean)
+const hasClass = (element, name) => classList(element).includes(name)
+const findAllByClass = (tree, name) => findElements(tree, (element) => hasClass(element, name))
+const findByClass = (tree, name) => findAllByClass(tree, name)[0]
+
+/** Every element in document order, so a layout assertion can compare positions. */
+const elementOrder = (tree) => {
+  const order = []
+  const walk = (node) => {
+    if (node === null || node === undefined || typeof node !== 'object') return
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child)
+      return
+    }
+    order.push(node)
+    walk(node.children)
+  }
+  walk(tree)
+  return order
+}
+const orderOf = (order, predicate) => order.findIndex(predicate)
+
 let clientExports = null
 let factoryError = null
 try {
@@ -858,22 +1063,26 @@ ok('lib/client.js: exports inject as an array', Array.isArray(clientExports?.inj
 ok('lib/client.js: injects the slots service', clientExports?.inject?.includes('slots'))
 ok('lib/client.js: injects nothing the shell does not provide', (clientExports?.inject ?? []).every((s) => s === 'slots'), JSON.stringify(clientExports?.inject))
 ok(
-  'lib/client.js: injects exactly one stylesheet tag',
-  head.children.filter((tag) => tag.dataset.pluginCss !== undefined).length === 1 &&
-    head.children[0].dataset.plugin === pkg.name,
+  'lib/client.js: injects exactly two stylesheet tags (workspace+ panel, notice page)',
+  head.children.filter((tag) => tag.dataset.pluginCss !== undefined).length === 2 &&
+    head.children.every((tag) => tag.dataset.plugin === pkg.name),
   `tags=${head.children.length}`,
 )
-ok('lib/client.js: the stylesheet is namespaced', head.children[0]?.textContent.includes('.dsh-workspace-plus-'))
-ok('lib/client.js: the stylesheet styles the injected row button', head.children[0]?.textContent.includes('.dsh-workspace-plus-rowbtn'))
+ok('lib/client.js: the workspace+ stylesheet is namespaced', head.children[0]?.textContent.includes('.dsh-workspace-plus-'))
+ok('lib/client.js: the workspace+ stylesheet styles the injected row button', head.children[0]?.textContent.includes('.dsh-workspace-plus-rowbtn'))
+ok('lib/client.js: the notice stylesheet is namespaced under dsh-notice- classes', head.children[1]?.textContent.includes('.dsh-notice-section'), head.children[1]?.textContent.slice(0, 40))
 {
   // A client-module reload re-runs the factory in the page that is already open:
-  // the stylesheet must stay a single, CURRENT tag instead of a stale duplicate.
+  // each stylesheet must stay a single, CURRENT tag instead of a stale duplicate.
   head.children[0].textContent = 'stale'
+  head.children[1].textContent = 'stale'
   registration.factory(requireStub)
   const tags = head.children.filter((tag) => tag.dataset.pluginCss !== undefined)
   ok(
-    'lib/client.js: a reload rewrites the one stylesheet instead of duplicating a stale one',
-    tags.length === 1 && String(tags[0].textContent).includes('.dsh-workspace-plus-dialog-card'),
+    'lib/client.js: a reload rewrites both stylesheets instead of duplicating stale ones',
+    tags.length === 2 &&
+      String(tags[0].textContent).includes('.dsh-workspace-plus-dialog-card') &&
+      String(tags[1].textContent).includes('.dsh-notice-section'),
     `tags=${String(tags.length)}`,
   )
 }
@@ -890,7 +1099,7 @@ ok('lib/client.js: the stylesheet styles the injected row button', head.children
 }
 
 registration.factory(requireStub)
-ok('lib/client.js: style injection is idempotent', head.children.length === 1, `tags=${head.children.length}`)
+ok('lib/client.js: style injection is idempotent', head.children.length === 2, `tags=${head.children.length}`)
 
 // ---------------------------------------------------------------------------
 // 6. The dialog's external store
@@ -981,8 +1190,8 @@ settleDom()
 
 ok('row buttons: reports availability once the sidebar is mounted', availability.length === 1 && availability[0] === true, JSON.stringify(availability))
 ok('row buttons: available() reflects the injection', installer.available() === true)
-const injectedOne = actionsOne.children.filter((child) => child.className === clientExports.ROW_BUTTON_CLASS)
-const injectedTwo = actionsTwo.children.filter((child) => child.className === clientExports.ROW_BUTTON_CLASS)
+const injectedOne = actionsOne.children.filter((child) => child.classList.contains(clientExports.ROW_BUTTON_CLASS))
+const injectedTwo = actionsTwo.children.filter((child) => child.classList.contains(clientExports.ROW_BUTTON_CLASS))
 ok('row buttons: one button per workspace row', injectedOne.length === 1 && injectedTwo.length === 1)
 ok('row buttons: the ungrouped row gets none', actionsUngrouped.children.length === 0)
 ok(
@@ -1003,16 +1212,90 @@ ok(
     return lone.children[0] === only && lone.children[1] === button
   })(),
 )
-ok('row buttons: the button is labelled for assistive tech', injectedOne[0].getAttribute('aria-label') === clientExports.ROW_BUTTON_LABEL && injectedOne[0].title === clientExports.ROW_BUTTON_LABEL, injectedOne[0].getAttribute('aria-label'))
-ok('row buttons: the button carries an inline glyph', String(injectedOne[0].innerHTML).startsWith('<svg') && String(injectedOne[0].innerHTML).includes('</svg>'))
-ok('row buttons: the glyph uses the shell\'s 16px artwork grid', String(injectedOne[0].innerHTML).includes('viewBox="0 0 16 16"') && String(injectedOne[0].innerHTML).includes('fill="currentColor"'))
+// Null-tolerant reads from here on: a regression that loses the injected button
+// must report a readable FAIL, not throw out of the suite.
+const firstInjected = injectedOne[0] ?? null
+ok(
+  'row buttons: the button is labelled for assistive tech',
+  firstInjected?.getAttribute('aria-label') === clientExports.ROW_BUTTON_LABEL && firstInjected?.title === clientExports.ROW_BUTTON_LABEL,
+  firstInjected?.getAttribute('aria-label') ?? 'no button',
+)
+ok('row buttons: the button carries an inline glyph', String(firstInjected?.innerHTML).startsWith('<svg') && String(firstInjected?.innerHTML).includes('</svg>'))
+ok('row buttons: the glyph uses the shell\'s 16px artwork grid', String(firstInjected?.innerHTML).includes('viewBox="0 0 16 16"') && String(firstInjected?.innerHTML).includes('fill="currentColor"'))
 
 let clickPrevented = 0
 let clickStopped = 0
-injectedOne[0].listeners.click({ preventDefault: () => (clickPrevented += 1), stopPropagation: () => (clickStopped += 1) })
+firstInjected?.listeners.click({ preventDefault: () => (clickPrevented += 1), stopPropagation: () => (clickStopped += 1) })
 ok('row buttons: clicking opens the dialog for that workspace', clientExports.readDialog().open === true && clientExports.readDialog().workspaceId === 'ws-1', JSON.stringify(clientExports.readDialog()))
 ok('row buttons: the click never reaches the row toggle', clickPrevented === 1 && clickStopped === 1, `${clickPrevented}/${clickStopped}`)
 clientExports.closeWorkdirsDialog()
+
+// The release is the second trigger. A press whose click the browser drops (the
+// shell re-rendered the node mid-press) still ends in a pointerup, and that must
+// open the same dialog; a non-primary release must not, and a touch release must
+// not either (a scroll-drag starting on the button would otherwise open it).
+ok(
+  'row buttons: a left release opens the dialog even when the click is dropped',
+  (() => {
+    clientExports.closeWorkdirsDialog()
+    firstInjected?.listeners.pointerup({ button: 0, pointerType: 'mouse', preventDefault() {}, stopPropagation() {} })
+    const dialog = clientExports.readDialog()
+    clientExports.closeWorkdirsDialog()
+    return dialog.open === true && dialog.workspaceId === 'ws-1'
+  })(),
+)
+ok(
+  'row buttons: a right release does not',
+  (() => {
+    clientExports.closeWorkdirsDialog()
+    firstInjected?.listeners.pointerup({ button: 2, pointerType: 'mouse', preventDefault() {}, stopPropagation() {} })
+    const open = clientExports.readDialog().open
+    clientExports.closeWorkdirsDialog()
+    return open === false
+  })(),
+)
+ok(
+  'row buttons: a touch release does not open on its own',
+  (() => {
+    clientExports.closeWorkdirsDialog()
+    firstInjected?.listeners.pointerup({ button: 0, pointerType: 'touch', preventDefault() {}, stopPropagation() {} })
+    const open = clientExports.readDialog().open
+    clientExports.closeWorkdirsDialog()
+    return open === false
+  })(),
+)
+ok(
+  'row buttons: a click plus its release open exactly one dialog',
+  (() => {
+    clientExports.closeWorkdirsDialog()
+    let opens = 0
+    const unsubscribe = clientExports.subscribeDialog(() => {
+      if (clientExports.readDialog().open) opens += 1
+    })
+    firstInjected?.listeners.pointerup({ button: 0, pointerType: 'mouse', preventDefault() {}, stopPropagation() {} })
+    firstInjected?.listeners.click({ preventDefault() {}, stopPropagation() {} })
+    unsubscribe()
+    const snapshot = clientExports.readDialog()
+    clientExports.closeWorkdirsDialog()
+    return opens === 1 && snapshot.open === true
+  })(),
+)
+
+// A reconcile pass that has nothing to do must not touch the DOM at all: a
+// detach/re-attach there is what kills the browser's click, because the press
+// target is disconnected when the pointer is released.
+let seatWrites = 0
+const originalInsertBefore = actionsOne.insertBefore
+actionsOne.insertBefore = function countingInsertBefore(...args) {
+  seatWrites += 1
+  return originalInsertBefore.apply(this, args)
+}
+settleDom()
+installer.refresh()
+settleDom()
+actionsOne.insertBefore = originalInsertBefore
+ok('row buttons: a reconcile pass with nothing to change never touches the DOM', seatWrites === 0, `${String(seatWrites)} DOM write(s)`)
+ok('row buttons: that pass still leaves the seat correct', actionsOne.children[1] === injectedOne[0] && actionsOne.children[2] === reactNewSession, actionsOne.children.map((child) => child.className).join(' | '))
 
 // A re-render must not duplicate the button, and a removed row must lose it.
 settleDom()
@@ -1034,12 +1317,18 @@ settleDom()
 ok('row buttons: a removed row loses its button', injectedTwo[0].parent === null)
 ok('row buttons: the remaining row keeps its button', actionsOne.children.length === 3)
 
-// The default-Workspace gate. Before any payload the id is unknown, so the row
-// keeps its entry point; once the host reports the workspace as disabled, the
-// button must go away — and come back when the settings switch is flipped.
-const rowButtonIn = (actions) => actions.children.filter((child) => child.className === clientExports.ROW_BUTTON_CLASS)
-ok('default-workspace gate: an unknown workspace keeps its entry point', clientExports.isEnabledWorkspace('ws-never-seen') === true)
-ok('default-workspace gate: the default row starts with a button', rowButtonIn(actionsDefault).length === 1)
+// The workspace switch. It governs the label table and the `workspace_dirs`
+// tool — never the entry point: a switched-off workspace keeps its row button
+// (drawn dimmed, labelled with the reason) because the dialog is where its
+// labels are read and the settings page is where the switch is flipped.
+const rowButtonIn = (actions) =>
+  actions.children.filter((child) => child.classList.contains(clientExports.ROW_BUTTON_CLASS))
+// Read through a null-tolerant accessor so a regression reports a readable FAIL
+// instead of throwing out of the suite (a missing button is the failure).
+const rowButton = (actions) => rowButtonIn(actions)[0] ?? null
+const isMarkedOff = (button) => button !== null && button.classList.contains(clientExports.ROW_BUTTON_OFF_CLASS)
+ok('workspace switch: an unknown workspace counts as on', clientExports.isEnabledWorkspace('ws-never-seen') === true)
+ok('workspace switch: the default row starts with a button', rowButtonIn(actionsDefault).length === 1)
 clientExports.publishHostPayload({
   ok: true,
   settings: { defaultWorkspaceEnabled: false },
@@ -1051,9 +1340,44 @@ clientExports.publishHostPayload({
   ],
 })
 installer.refresh()
-ok('default-workspace gate: the host snapshot marks it disabled', clientExports.isEnabledWorkspace('ws-default') === false)
-ok('default-workspace gate: a disabled default row loses its button', rowButtonIn(actionsDefault).length === 0)
-ok('default-workspace gate: enabled rows keep theirs', rowButtonIn(actionsOne).length === 1)
+ok('workspace switch: the host snapshot marks it disabled', clientExports.isEnabledWorkspace('ws-default') === false)
+ok(
+  'workspace switch: a switched-off row keeps its button',
+  rowButtonIn(actionsDefault).length === 1,
+  `buttons in the row: ${String(rowButtonIn(actionsDefault).length)}`,
+)
+ok(
+  'workspace switch: that button draws dimmed',
+  isMarkedOff(rowButton(actionsDefault)),
+  rowButton(actionsDefault)?.className ?? 'no button',
+)
+ok(
+  'workspace switch: that button names the reason',
+  rowButton(actionsDefault)?.title === clientExports.ROW_BUTTON_LABEL_OFF &&
+    rowButton(actionsDefault)?.getAttribute('aria-label') === clientExports.ROW_BUTTON_LABEL_OFF,
+  rowButton(actionsDefault)?.title ?? 'no button',
+)
+ok('workspace switch: enabled rows keep theirs', rowButtonIn(actionsOne).length === 1)
+ok(
+  'workspace switch: enabled rows stay unmarked',
+  !isMarkedOff(rowButton(actionsOne)) && rowButton(actionsOne)?.title === clientExports.ROW_BUTTON_LABEL,
+  rowButton(actionsOne)?.className ?? 'no button',
+)
+ok(
+  'workspace switch: clicking a switched-off row still opens its dialog',
+  (() => {
+    const button = rowButton(actionsDefault)
+    if (button === null) return false
+    clientExports.closeWorkdirsDialog()
+    button.listeners.click({
+      preventDefault() {},
+      stopPropagation() {},
+    })
+    const dialog = clientExports.readDialog()
+    clientExports.closeWorkdirsDialog()
+    return dialog.open === true && dialog.workspaceId === 'ws-default'
+  })(),
+)
 clientExports.publishHostPayload({
   ok: true,
   settings: { defaultWorkspaceEnabled: true },
@@ -1065,7 +1389,25 @@ clientExports.publishHostPayload({
   ],
 })
 installer.refresh()
-ok('default-workspace gate: flipping the switch restores the button without a reload', rowButtonIn(actionsDefault).length === 1)
+ok(
+  'workspace switch: flipping the switch unmarks the button without a reload',
+  rowButtonIn(actionsDefault).length === 1 &&
+    !isMarkedOff(rowButton(actionsDefault)) &&
+    rowButton(actionsDefault)?.title === clientExports.ROW_BUTTON_LABEL,
+  rowButton(actionsDefault)?.className ?? 'no button',
+)
+clientExports.publishHostPayload({
+  ok: true,
+  settings: { defaultWorkspaceEnabled: true },
+  defaultWorkspaceId: 'ws-default',
+  defaultWorkspacePath: defaultDir,
+  workspaces: [
+    { id: 'ws-1', path: workspaceRoot, title: 'demo', isDefault: false, enabled: true, dirs: [] },
+    { id: 'ws-default', path: defaultDir, title: '默认工作区', isDefault: true, enabled: true, dirs: [] },
+  ],
+})
+installer.refresh()
+ok('workspace switch: a restored switch keeps the same single button', rowButtonIn(actionsDefault).length === 1)
 
 installer.dispose()
 ok('row buttons: dispose removes every injected button', actionsOne.children.length === 2)
@@ -1170,12 +1512,16 @@ try {
   clientApplyError = error
 }
 ok('client apply(): registers without throwing', clientApplyError === null, clientApplyError?.message)
+// The 通知 sub-feature adds a second `settings.section` registration (its own
+// page) alongside the workspace+ page; the other slot waits stay unchanged.
 ok(
   'client apply(): every registration waits for its slot declaration',
-  JSON.stringify(first.injections) === JSON.stringify(['settings.section', 'shell.overlay', 'main', 'sidebar.panellist']),
+  JSON.stringify(first.injections) === JSON.stringify(['settings.section', 'settings.section', 'shell.overlay', 'main', 'sidebar.panellist']),
   first.injections.join(', '),
 )
-ok('client apply(): uses ctx.effect for lifecycle ownership', first.effects.length === 6 && first.effects.every((effect) => typeof effect.label === 'string'), String(first.effects.length))
+// The effects are: workspace+ settings slot, notice poll, notice settings slot,
+// dialog overlay, fallback main panel, directory picker, row buttons.
+ok('client apply(): uses ctx.effect for lifecycle ownership', first.effects.length === 7 && first.effects.every((effect) => typeof effect.label === 'string'), String(first.effects.length))
 ok('client apply(): injects the shell directory picker optionally', JSON.stringify(first.serviceInjections) === JSON.stringify(['uiWorkspace', 'sessions', 'inputTriggers']), first.serviceInjections.join(', '))
 
 const names = (kind) => first.contributions.filter((c) => c.options.name === kind)
@@ -1195,11 +1541,16 @@ ok('client apply(): the overlay entry id is stable', overlay[0]?.options.id === 
 ok('client apply(): the overlay entry is the dialog', overlay[0]?.component === clientExports.WorkdirsDialog)
 
 const settingsSections = names('settings.section')
-ok('client apply(): registers exactly one settings page', settingsSections.length === 1, String(settingsSections.length))
-ok('client apply(): the settings page id is stable', settingsSections[0]?.options.id === clientExports.SETTINGS_SECTION_ID, settingsSections[0]?.options.id)
-ok('client apply(): the settings nav label is "workspace+"', settingsSections[0]?.options.label === 'workspace+', settingsSections[0]?.options.label)
-ok('client apply(): the settings page sits after the shipped sections', settingsSections[0]?.options.order > 20, String(settingsSections[0]?.options.order))
-ok('client apply(): the settings page component is exported for tests', settingsSections[0]?.component === clientExports.WorkspacePlusSettings)
+ok('client apply(): registers exactly two settings pages (workspace+ and 通知)', settingsSections.length === 2, String(settingsSections.length))
+const workspacePlusSection = settingsSections.find((c) => c.options.id === clientExports.SETTINGS_SECTION_ID)
+const noticeSection = settingsSections.find((c) => c.options.id === clientExports.NOTICE_SETTINGS_SECTION_ID)
+ok('client apply(): the workspace+ settings page id is stable', workspacePlusSection !== undefined, settingsSections.map((c) => c.options.id).join(', '))
+ok('client apply(): the settings nav label is "workspace+"', workspacePlusSection?.options.label === 'workspace+', workspacePlusSection?.options.label)
+ok('client apply(): the settings page sits after the shipped sections', workspacePlusSection?.options.order > 20, String(workspacePlusSection?.options.order))
+ok('client apply(): the settings page component is exported for tests', workspacePlusSection?.component === clientExports.WorkspacePlusSettings)
+// The 通知 page keeps the dsh-notice identity, so an upgrade reads as the same page.
+ok('client apply(): the notice settings page keeps the dsh-notice identity', noticeSection !== undefined && noticeSection.options.id === 'notice' && noticeSection.options.label === '通知' && noticeSection.options.order === 26, JSON.stringify(noticeSection?.options))
+ok('client apply(): the notice settings page component is exported for tests', noticeSection?.component === clientExports.NoticeSettings)
 
 // The row buttons worked in this environment, so the fallback entry must NOT be
 // registered: that is the "row button first, sidebar entry only as a fallback"
@@ -1240,7 +1591,7 @@ clientExports.closeWorkdirsDialog()
 // ---------------------------------------------------------------------------
 const hintPanel = names('main')[0].component
 const dialog = overlay[0].component
-const settingsPage = settingsSections[0].component
+const settingsPage = workspacePlusSection.component
 
 const hintTree = render(hintPanel({}))
 const hintText = collectText(hintTree)
@@ -1369,21 +1720,93 @@ ok(
   openSurface?.props.className.includes('dsh-workspace-plus-dialog-card'),
   openSurface?.props.className,
 )
+ok('dialog: drops the modal description paragraph', openSurface?.props.description === undefined, String(openSurface?.props.description))
 {
   const css = String(head.children[0]?.textContent ?? '')
   const rule = css.match(/\.dsh-workspace-plus-dialog-card\.dsh-workspace-plus-dialog-card\{([^}]*)\}/)?.[1] ?? ''
   // Two classes beat the shell's own single-class `.dialog` rule whatever the
-  // stylesheet order turns out to be.
-  ok('dialog CSS: widens the card', rule.includes('width:min(760px,100%)'), rule)
+  // stylesheet order turns out to be. 640px fits a label, an absolute path, a
+  // note and a badge, while still reading as one of the shell's product dialogs.
+  ok('dialog CSS: widens the card to 640px', rule.includes('width:min(640px,100%)'), rule)
+  ok('dialog CSS: drops the old 760px width', !css.includes('width:min(760px,100%)'))
 }
-ok('dialog: drops the modal description paragraph', openSurface?.props.description === undefined, String(openSurface?.props.description))
 ok(
   'dialog: drops the trailing sandbox footnote',
   !openText.includes('一个工作区可以登记') && !openText.includes('标签映射会自动注入') && !openText.includes('这里会把这类目录标注出来'),
   openText.slice(0, 80),
 )
+ok('dialog: drops the inline 根目录 line the identity field absorbed', !openText.includes('根目录：'), openText.slice(0, 120))
+
+// --- the identity field: one bordered row naming the workspace --------------
+const identityField = findByClass(openTree, 'dsh-workspace-plus-field')
+ok(
+  'dialog: renders exactly one identity field',
+  findAllByClass(openTree, 'dsh-workspace-plus-field').length === 1,
+  String(findAllByClass(openTree, 'dsh-workspace-plus-field').length),
+)
+{
+  const glyph = findElements(identityField ?? {}, (element) => hasClass(element, 'dsh-workspace-plus-field-glyph'))
+  const title = findByClass(identityField, 'dsh-workspace-plus-field-title')
+  const root = findByClass(identityField, 'dsh-workspace-plus-field-root')
+  ok(
+    'dialog: the identity field leads with a folder glyph',
+    glyph.length === 1 && findElements(glyph[0] ?? {}, (element) => element.type === 'svg').length === 1,
+  )
+  ok(
+    'dialog: the identity field names the locked workspace',
+    collectText(title) === 'demo' && title?.props?.title === 'demo',
+    collectText(title),
+  )
+  ok(
+    'dialog: the identity field carries the absolute root with a native title',
+    collectText(root) === workspaceRoot && root?.props?.title === workspaceRoot,
+    String(root?.props?.title),
+  )
+  const rootRule = String(head.children[0]?.textContent ?? '').match(/\.dsh-workspace-plus-field-root\{([^}]*)\}/)?.[1] ?? ''
+  ok('dialog CSS: the field root stays in the mono face', rootRule.includes('font-family:var(--dsw-font-mono'), rootRule.slice(0, 60))
+}
+ok('dialog: locks onto the triggering workspace — no picker', findElements(openTree, (element) => element.type === 'select').length === 0)
+ok('dialog: names the locked workspace', openText.includes('demo') && openText.includes(workspaceRoot), openText.slice(0, 80))
+
+// --- the 目录 section label and the directory list ---------------------------
+const sectionLabel = findByClass(openTree, 'dsh-workspace-plus-section')
+ok('dialog: labels the directory list 目录 and nothing more', sectionLabel !== undefined && collectText(sectionLabel) === '目录', collectText(sectionLabel))
+ok(
+  'dialog: renders exactly one section label',
+  findAllByClass(openTree, 'dsh-workspace-plus-section').length === 1,
+  String(findAllByClass(openTree, 'dsh-workspace-plus-section').length),
+)
+const rowList = findAllByClass(openTree, 'dsh-workspace-plus-row')
+ok('dialog: renders one row per registered directory', rowList.length === readyState.workspaces[0].dirs.length, String(rowList.length))
 ok('dialog: lists every registered label', readyState.workspaces[0].dirs.every((dir) => openText.includes(dir.label)))
 ok('dialog: shows every absolute path', readyState.workspaces[0].dirs.every((dir) => openText.includes(dir.path)))
+{
+  const tag = findByClass(rowList[0], 'dsh-workspace-plus-row-tag')
+  const path = findByClass(rowList[0], 'dsh-workspace-plus-row-path')
+  const glyph = findByClass(rowList[0], 'dsh-workspace-plus-field-glyph')
+  ok(
+    'dialog: a row tags its label with a native title',
+    collectText(tag) === 'backend' && tag?.props?.title === 'backend',
+    String(tag?.props?.title),
+  )
+  ok(
+    'dialog: a row carries the absolute path with a native title',
+    collectText(path) === backendDir && path?.props?.title === backendDir,
+    String(path?.props?.title),
+  )
+  ok(
+    'dialog: a row leads with the same folder glyph as the identity field',
+    glyph !== undefined && findElements(glyph, (element) => element.type === 'svg').length === 1,
+  )
+  const notes = findAllByClass(openTree, 'dsh-workspace-plus-row-note')
+  ok(
+    'dialog: shows a note only for the directory that has one',
+    notes.length === 1 && collectText(notes[0]) === '后端 API',
+    `${String(notes.length)}: ${collectText(notes[0])}`,
+  )
+  const tagRule = String(head.children[0]?.textContent ?? '').match(/\.dsh-workspace-plus-row-tag\{([^}]*)\}/)?.[1] ?? ''
+  ok('dialog CSS: the row tag is plain text, not a pill', tagRule !== '' && !tagRule.includes('background') && !tagRule.includes('border-radius'), tagRule)
+}
 {
   // Outside the workspace root the row carries the shell's shield, and the
   // explanation is the tooltip's payload rather than row copy.
@@ -1403,100 +1826,341 @@ ok('dialog: shows every absolute path', readyState.workspaces[0].dirs.every((dir
   const shield = findElements(badges[0] ?? {}, (element) => element.type === 'svg')[0]
   ok('dialog: the badge draws a shield glyph', shield !== undefined && String(shield?.children?.[0]?.props?.d ?? '').startsWith('M6.80132'))
 }
-ok('dialog: offers one remove control per directory', findElements(openTree, (element) => element.type === 'button').filter((b) => collectText(b) === '删除').length === 2)
+{
+  // The trailing action is the shell's cross rather than a word: its accessible
+  // name says what it removes, and no row carries the old 「删除」 button.
+  const removeButtons = findElements(openTree, (element) => element.type === 'button' && hasClass(element, 'dsh-workspace-plus-remove'))
+  ok('dialog: offers one remove control per directory', removeButtons.length === readyState.workspaces[0].dirs.length, String(removeButtons.length))
+  ok(
+    'dialog: the remove control is an icon button named after its label',
+    removeButtons.length > 0 &&
+      removeButtons.every(
+        (button) =>
+          button.props.type === 'button' &&
+          typeof button.props['aria-label'] === 'string' &&
+          button.props['aria-label'] === button.props.title &&
+          button.props['aria-label'].startsWith('移除 '),
+      ) &&
+      removeButtons.map((button) => button.props['aria-label']).join('|') ===
+        readyState.workspaces[0].dirs.map((dir) => '移除 ' + dir.label).join('|'),
+    removeButtons.map((button) => button.props['aria-label']).join('|'),
+  )
+  ok(
+    'dialog: the remove control draws a glyph instead of the word 删除',
+    removeButtons.length > 0 &&
+      removeButtons.every((button) => collectText(button) === '' && findElements(button, (element) => element.type === 'svg').length === 1) &&
+      !openText.includes('删除'),
+    removeButtons.map((button) => collectText(button)).join('|'),
+  )
+}
 const openInputs = findElements(openTree, (element) => element.type === 'input')
-ok('dialog: renders label and note, with no path input', openInputs.length === 2, String(openInputs.length))
+ok('dialog: renders no fields until a directory is chosen', openInputs.length === 0, String(openInputs.length))
+ok('dialog: the path control is not a text input', findElements(openTree, (element) => element.type === 'input' && element.props['aria-label'] === '目录绝对路径').length === 0)
+{
+  // Clicking the trailing cross asks the host to drop that label. The handler is
+  // fire-and-forget, so it must not throw before the request is made.
+  const removeButton = findByClass(openTree, 'dsh-workspace-plus-remove')
+  let removeError = null
+  try {
+    removeButton?.props.onClick()
+  } catch (error) {
+    removeError = error
+  }
+  ok('dialog: the remove control click handler runs', removeError === null, removeError?.message)
+}
+
+// --- the add group: one row that IS the picker, plus the draft it opens ------
+const addRows = findElements(openTree, (element) => element.type === 'button' && hasClass(element, 'dsh-workspace-plus-add'))
 ok(
-  'dialog: keeps label and note on one row',
-  openInputs.every((input) => input.props.className.includes('dsh-workspace-plus-input')) &&
-    openInputs.filter((input) => input.props.className.includes('dsh-workspace-plus-input-label')).length === 1 &&
-    openInputs.filter((input) => input.props.className.includes('dsh-workspace-plus-input-note')).length === 1,
-  openInputs.map((input) => input.props.className).join(' | '),
+  'dialog: renders the add row as the picker control',
+  addRows.length === 1 && addRows[0].props['aria-label'] === '选择目录' && addRows[0].props.type === 'button',
+  String(addRows.length),
 )
-ok('dialog: locks onto the triggering workspace — no picker', findElements(openTree, (element) => element.type === 'select').length === 0)
-ok('dialog: names the locked workspace', openText.includes('demo') && openText.includes(workspaceRoot), openText.slice(0, 80))
-const unlockedTree = render(dialog({ initial: { ...readyState, locked: false } }))
-ok('dialog: an unlocked trigger (sidebar fallback) still offers the picker', findElements(unlockedTree, (element) => element.type === 'select').length === 1)
-ok('dialog: dragging the lock to a closed state resets rendering', render(dialog({ initial: { ...readyState, locked: false } })) !== null)
+const addRow = addRows[0]
+ok('dialog: the add row shares the field-row grid', hasClass(addRow, 'dsh-workspace-plus-field-row'), String(addRow?.props?.className))
+ok('dialog: the add row leads with a plus glyph', findElements(addRow ?? {}, (element) => hasClass(element, 'dsh-workspace-plus-field-glyph')).length === 1)
+ok('dialog: the add row shows its prompt until a directory is picked', collectText(addRow) === '添加目录', collectText(addRow))
+ok(
+  'dialog: the add row is offered while the picker is mounted',
+  addRow?.props.disabled === false && addRow?.props.title === '打开目录选择器',
+  `${String(addRow?.props?.disabled)} ${String(addRow?.props?.title)}`,
+)
+ok('dialog: the path control is a button, not a field', addRow !== undefined)
+ok(
+  'dialog: the add group has no submit before a directory is chosen',
+  findElements(openTree, (element) => element.type === 'button' && collectText(element) === '添加').length === 0,
+)
+
+// The stack's reading order: identity → 目录 → rows → 添加目录 → footer.
+{
+  const order = elementOrder(openTree)
+  const at = {
+    identity: orderOf(order, (element) => hasClass(element, 'dsh-workspace-plus-field')),
+    section: orderOf(order, (element) => hasClass(element, 'dsh-workspace-plus-section')),
+    row: orderOf(order, (element) => hasClass(element, 'dsh-workspace-plus-row')),
+    add: orderOf(order, (element) => hasClass(element, 'dsh-workspace-plus-add')),
+    footer: orderOf(order, (element) => hasClass(element, 'dsh-workspace-plus-footer')),
+  }
+  ok(
+    'dialog: the stack reads identity → 目录 → rows → 添加目录 → footer',
+    Object.values(at).every((index) => index >= 0) &&
+      at.identity < at.section &&
+      at.section < at.row &&
+      at.row < at.add &&
+      at.add < at.footer,
+    `${String(at.identity)} < ${String(at.section)} < ${String(at.row)} < ${String(at.add)} < ${String(at.footer)}`,
+  )
+}
+
+// --- the footer: secondary action left, primary right ------------------------
 const dialogButtons = findElements(openTree, (element) => element.type === 'button')
 ok('dialog: offers a refresh and a done control', dialogButtons.some((b) => collectText(b) === '刷新') && dialogButtons.some((b) => collectText(b) === '完成'))
-const addButton = dialogButtons.find((b) => collectText(b) === '添加')
-ok('dialog: renders the add control', addButton !== undefined && typeof addButton.props.onClick === 'function')
 {
-  // Nothing is addable before a directory is chosen: the path field is the only
-  // source of a path now.
-  ok('dialog: the add control waits for a chosen directory', addButton?.props.disabled === true, String(addButton?.props.disabled))
+  const footer = findByClass(openTree, 'dsh-workspace-plus-footer')
+  const footerButtons = findElements(footer ?? {}, (element) => element.type === 'button')
+  ok(
+    'dialog: the footer splits into two buttons, secondary left and primary right',
+    footer !== undefined && footerButtons.length === 2 && collectText(footerButtons[0]) === '刷新' && collectText(footerButtons[1]) === '完成',
+    footerButtons.map((button) => collectText(button)).join('|'),
+  )
+  ok(
+    'dialog: the footer button variants are ghost then primary',
+    footerButtons[0]?.props?.variant === 'ghost' && footerButtons[1]?.props?.variant === 'primary',
+    `${String(footerButtons[0]?.props?.variant)}|${String(footerButtons[1]?.props?.variant)}`,
+  )
 }
-let addClickError = null
+
+// --- the draft row exists only while a directory is chosen -------------------
+// The draft is component state, so this drives the real handler through a hook
+// session and renders again with the same cells, the way the browser would.
+pickerReply = { kind: 'path', value: 'D:\\proj\\backend' }
+pickerCalls = 0
+const draftSession = renderWithHooks(dialog, { initial: readyState })
+const sessionAddRow = findByClass(draftSession.tree, 'dsh-workspace-plus-add')
+let pickClickError = null
 try {
-  addButton?.props.onClick()
+  sessionAddRow?.props.onClick()
 } catch (error) {
-  addClickError = error
+  pickClickError = error
 }
-ok('dialog: the add control click handler runs', addClickError === null, addClickError?.message)
 {
-  // The path control sits above the label row, as a control rather than an input.
-  const pathControl = dialogButtons.find((b) => b.props['aria-label'] === '选择目录')
-  const labelInput = openInputs.find((input) => input.props.className.includes('dsh-workspace-plus-input-label'))
-  ok('dialog: the path control is a button, not a field', pathControl !== undefined)
-  ok('dialog: the path control is not a text input', findElements(openTree, (element) => element.type === 'input' && element.props['aria-label'] === '目录绝对路径').length === 0)
-  const order = []
-  const walk = (node) => {
-    if (node === null || node === undefined || typeof node !== 'object') return
-    if (Array.isArray(node)) {
-      for (const child of node) walk(child)
-      return
-    }
-    order.push(node)
-    walk(node.children)
+  const pickingRow = findByClass(renderWithHooks(dialog, { initial: readyState }, draftSession.cells).tree, 'dsh-workspace-plus-add')
+  ok('dialog: the add row reports a pick in flight', collectText(pickingRow) === '选择中…', collectText(pickingRow))
+}
+await new Promise((resolve) => setTimeout(resolve, 0))
+const draftTree = renderWithHooks(dialog, { initial: readyState }, draftSession.cells).tree
+ok(
+  'dialog: clicking the add row asks the shell picker',
+  pickerCalls === 1 && pickClickError === null,
+  `${String(pickerCalls)} ${pickClickError?.message ?? ''}`,
+)
+ok(
+  'dialog: the picked path replaces the row prompt',
+  collectText(findByClass(draftTree, 'dsh-workspace-plus-add')) === 'D:\\proj\\backend',
+  collectText(findByClass(draftTree, 'dsh-workspace-plus-add')),
+)
+{
+  const text = findByClass(draftTree, 'dsh-workspace-plus-add-text')
+  ok('dialog: the picked path gets its mono modifier', hasClass(text, 'dsh-workspace-plus-add-path'), String(text?.props?.className))
+}
+{
+  const draftRow = findByClass(draftTree, 'dsh-workspace-plus-draft')
+  const draftInputs = findElements(draftRow ?? {}, (element) => element.type === 'input')
+  ok(
+    'dialog: a chosen directory reveals exactly the label and note fields',
+    findElements(draftTree, (element) => element.type === 'input').length === 2,
+    String(findElements(draftTree, (element) => element.type === 'input').length),
+  )
+  ok('dialog: the draft row shares the field-row grid', hasClass(draftRow, 'dsh-workspace-plus-field-row'), String(draftRow?.props?.className))
+  ok(
+    'dialog: keeps label and note on one row, inside the draft group',
+    draftInputs.length === 2 &&
+      draftInputs.every((input) => hasClass(input, 'dsh-workspace-plus-input')) &&
+      draftInputs.filter((input) => hasClass(input, 'dsh-workspace-plus-input-label') && input.props['aria-label'] === '标签').length === 1 &&
+      draftInputs.filter((input) => hasClass(input, 'dsh-workspace-plus-input-note') && input.props['aria-label'] === '说明').length === 1,
+    draftInputs.map((input) => input.props.className).join(' | '),
+  )
+  ok(
+    'dialog: the picked directory guesses its label and leaves the note empty',
+    draftInputs.find((input) => hasClass(input, 'dsh-workspace-plus-input-label'))?.props?.value === 'backend' &&
+      draftInputs.find((input) => hasClass(input, 'dsh-workspace-plus-input-note'))?.props?.value === '',
+    draftInputs.map((input) => String(input.props.value)).join(' | '),
+  )
+  const submit = findElements(draftRow ?? {}, (element) => element.type === 'button' && collectText(element) === '添加')[0]
+  ok(
+    'dialog: the draft row offers the primary submit control',
+    submit !== undefined &&
+      hasClass(submit, 'dsh-workspace-plus-submit') &&
+      submit.props.variant === 'primary' &&
+      typeof submit.props.onClick === 'function',
+    String(submit?.props?.className),
+  )
+  ok('dialog: the submit is enabled once a path exists', submit?.props.disabled === false, String(submit?.props?.disabled))
+  let inputError = null
+  try {
+    for (const input of draftInputs) input.props.onChange({ target: { value: 'x' } })
+  } catch (error) {
+    inputError = error
   }
-  walk(openTree)
-  const pathAt = order.indexOf(pathControl)
-  const labelAt = order.indexOf(labelInput)
-  ok('dialog: the path control stands on the line above the label', pathAt >= 0 && labelAt >= 0 && pathAt < labelAt, `${String(pathAt)} < ${String(labelAt)}`)
-  ok('dialog: the path control shows its prompt until a directory is picked', collectText(pathControl) === '选择目录…', collectText(pathControl))
+  ok('dialog: every input accepts typing', draftInputs.length === 2 && inputError === null, inputError?.message)
 }
-const inputs = findElements(openTree, (element) => element.type === 'input' && typeof element.props.onChange === 'function')
-let inputError = null
-try {
-  for (const input of inputs) input.props.onChange({ target: { value: 'x' } })
-} catch (error) {
-  inputError = error
-}
-ok('dialog: every input accepts typing', inputs.length === 2 && inputError === null, inputError?.message)
-const removeButton = dialogButtons.find((b) => collectText(b) === '删除')
-let removeError = null
-try {
-  removeButton?.props.onClick()
-} catch (error) {
-  removeError = error
-}
-ok('dialog: the remove control click handler runs', removeError === null, removeError?.message)
-clientExports.closeWorkdirsDialog()
 
-const loadingText = collectText(render(dialog({ initial: { ...readyState, status: 'loading', workspaces: [], selected: null } })) ?? '')
+// --- the unlocked trigger keeps the workspace picker in the same field -------
+const unlockedTree = render(dialog({ initial: { ...readyState, locked: false } }))
+{
+  const field = findByClass(unlockedTree, 'dsh-workspace-plus-field')
+  const select = findByClass(field, 'dsh-workspace-plus-select')
+  ok(
+    'dialog: an unlocked trigger (sidebar fallback) still offers the picker',
+    findElements(field ?? {}, (element) => element.type === 'select').length === 1 && select?.props['aria-label'] === '选择工作区',
+    String(select?.props['aria-label']),
+  )
+  ok(
+    'dialog: the unlocked field drops the locked title and root',
+    findByClass(field, 'dsh-workspace-plus-field-title') === undefined && findByClass(field, 'dsh-workspace-plus-field-root') === undefined,
+  )
+}
+ok('dialog: dragging the lock to a closed state resets rendering', render(dialog({ initial: { ...readyState, locked: false } })) !== null)
+
+// The switch lives on the settings page, not in this dialog, so a workspace
+// that is switched off is stated here instead of leaving the user to guess why
+// nothing reaches their conversations.
+const offDialogState = {
+  ...readyState,
+  workspaces: [{ ...readyState.workspaces[0], enabled: false }],
+}
+const offTree = render(dialog({ initial: offDialogState }))
+const offDialogText = collectText(offTree)
+ok('dialog: names a switched-off workspace', offDialogText.includes('已在 workspace+ 里停用'), offDialogText.slice(0, 120))
+ok('dialog: points at the settings page that owns the switch', offDialogText.includes('设置 → workspace+'))
+{
+  const notice = findByClass(offTree, 'dsh-workspace-plus-notice')
+  ok('dialog: the switched-off state is a warning notice', hasClass(notice, 'dsh-workspace-plus-notice-warn'), String(notice?.props?.className))
+  ok('dialog: the warning sits in its own off block', collectText(findByClass(notice, 'dsh-workspace-plus-off')).includes('已在 workspace+ 里停用'))
+  const order = elementOrder(offTree)
+  const noticeAt = orderOf(order, (element) => hasClass(element, 'dsh-workspace-plus-notice'))
+  const footerAt = orderOf(order, (element) => hasClass(element, 'dsh-workspace-plus-footer'))
+  ok('dialog: a notice sits above the footer', noticeAt >= 0 && footerAt >= 0 && noticeAt < footerAt, `${String(noticeAt)} < ${String(footerAt)}`)
+}
+const onDialogText = collectText(
+  render(dialog({ initial: { ...readyState, workspaces: [{ ...readyState.workspaces[0], enabled: true }] } })),
+)
+ok('dialog: stays quiet while the workspace is switched on', !onDialogText.includes('已在 workspace+ 里停用'))
+
+// --- the status line: the host's own sentence, and never a repeated failure --
+{
+  const okTree = render(dialog({ initial: { ...readyState, message: '已登记 backend', ok: true } }))
+  const okStatus = findByClass(okTree, 'dsh-workspace-plus-status')
+  ok(
+    'dialog: prints the host message in the status line after an action',
+    collectText(okStatus) === '已登记 backend' && hasClass(okStatus, 'dsh-workspace-plus-ok'),
+    String(okStatus?.props?.className),
+  )
+  const refusedTree = render(dialog({ initial: { ...readyState, message: '标签已存在', ok: false } }))
+  const refusedStatus = findByClass(refusedTree, 'dsh-workspace-plus-status')
+  ok(
+    'dialog: marks a refused action as an error',
+    collectText(refusedStatus) === '标签已存在' && hasClass(refusedStatus, 'dsh-workspace-plus-error'),
+    String(refusedStatus?.props?.className),
+  )
+}
+clientExports.closeWorkdirsDialog()
+ok('dialog: renders nothing again once the store closes', render(dialog({ initial: { ...readyState, status: 'loading', workspaces: [], selected: null } })) === null)
 clientExports.openWorkdirsDialog(null)
-const loadingOpenText = collectText(render(dialog({ initial: { ...readyState, status: 'loading', workspaces: [], selected: null } })))
-ok('dialog: shows a loading state', loadingOpenText.includes('正在读取'), loadingText || loadingOpenText.slice(0, 40))
+{
+  const loadingTree = render(dialog({ initial: { ...readyState, status: 'loading', workspaces: [], selected: null } }))
+  const loadingList = findByClass(loadingTree, 'dsh-workspace-plus-list')
+  const loadingRow = findByClass(loadingList, 'dsh-workspace-plus-empty')
+  ok('dialog: shows a loading state', collectText(loadingTree).includes('正在读取…'), collectText(loadingTree).slice(0, 40))
+  ok(
+    'dialog: loading is an empty field row inside the list',
+    hasClass(loadingRow, 'dsh-workspace-plus-field-row') && collectText(loadingList) === '正在读取…',
+    String(loadingRow?.props?.className),
+  )
+}
 
-const errorOpenText = collectText(render(dialog({ initial: { ...readyState, status: 'error', workspaces: [], selected: null, message: 'Failed to fetch' } })))
-ok('dialog: explains an unreachable host instead of pretending it is empty', errorOpenText.includes('无法连接') && errorOpenText.includes('workspace_dirs'), errorOpenText.slice(0, 90))
+{
+  const errorTree = render(dialog({ initial: { ...readyState, status: 'error', workspaces: [], selected: null, message: 'Failed to fetch' } }))
+  const errorText = collectText(errorTree)
+  ok('dialog: explains an unreachable host instead of pretending it is empty', errorText.includes('无法连接') && errorText.includes('workspace_dirs'), errorText.slice(0, 90))
+  const errorNotice = findByClass(errorTree, 'dsh-workspace-plus-notice')
+  ok('dialog: the host failure is a bordered error notice', hasClass(errorNotice, 'dsh-workspace-plus-notice-error'), String(errorNotice?.props?.className))
+  ok(
+    'dialog: the notice carries the host message and the tool hint',
+    collectText(findByClass(errorNotice, 'dsh-workspace-plus-error')).includes('无法连接 host 接口：Failed to fetch') &&
+      findAllByClass(errorNotice, 'dsh-workspace-plus-note').length === 2,
+    collectText(findByClass(errorNotice, 'dsh-workspace-plus-error')),
+  )
+  ok(
+    'dialog: the failure is not repeated in the status line',
+    findAllByClass(errorTree, 'dsh-workspace-plus-status').length === 0,
+    String(findAllByClass(errorTree, 'dsh-workspace-plus-status').length),
+  )
+}
 
-const unroutedOpenText = collectText(render(dialog({ initial: { ...readyState, status: 'error', workspaces: [], selected: null, message: 'host responded 404' } })))
-ok('dialog: diagnoses a 404 as a stale host process', unroutedOpenText.includes('重启 dsh') && unroutedOpenText.includes('host half loaded'), unroutedOpenText.slice(0, 120))
+{
+  const unroutedText = collectText(render(dialog({ initial: { ...readyState, status: 'error', workspaces: [], selected: null, message: 'host responded 404' } })))
+  ok('dialog: diagnoses a 404 as a stale host process', unroutedText.includes('重启 dsh') && unroutedText.includes('host half loaded'), unroutedText.slice(0, 120))
+  const unauthorizedText = collectText(render(dialog({ initial: { ...readyState, status: 'error', workspaces: [], selected: null, message: 'host responded 401' } })))
+  ok('dialog: gives actionable advice on an unauthorized page', unauthorizedText.includes('token') && !unauthorizedText.includes('workspaceplus/api'), unauthorizedText.slice(0, 90))
+}
 
-const unauthorizedOpenText = collectText(render(dialog({ initial: { ...readyState, status: 'error', workspaces: [], selected: null, message: 'host responded 401' } })))
-ok('dialog: gives actionable advice on an unauthorized page', unauthorizedOpenText.includes('token') && !unauthorizedOpenText.includes('workspaceplus/api'), unauthorizedOpenText.slice(0, 90))
+{
+  const emptyTree = render(dialog({ initial: { ...readyState, workspaces: [], selected: null } }))
+  ok('dialog: explains an empty workspace list', collectText(emptyTree).includes('还没有任何工作区'), collectText(emptyTree).slice(0, 60))
+  ok(
+    'dialog: the empty-workspace state is a plain notice with a note',
+    hasClass(findByClass(emptyTree, 'dsh-workspace-plus-notice'), 'dsh-workspace-plus-notice') &&
+      findAllByClass(emptyTree, 'dsh-workspace-plus-notice-error').length === 0 &&
+      findByClass(emptyTree, 'dsh-workspace-plus-note') !== undefined,
+    String(findByClass(emptyTree, 'dsh-workspace-plus-notice')?.props?.className),
+  )
+}
 
-const emptyOpenText = collectText(render(dialog({ initial: { ...readyState, workspaces: [], selected: null } })))
-ok('dialog: explains an empty workspace list', emptyOpenText.includes('还没有任何工作区'), emptyOpenText.slice(0, 60))
+{
+  const noRegistryTree = render(dialog({ initial: { ...readyState, registryAvailable: false, workspaces: [], selected: null } }))
+  ok('dialog: explains a host without the workspace registry', collectText(noRegistryTree).includes('workspace_dirs'), collectText(noRegistryTree).slice(0, 60))
+  ok(
+    'dialog: the registry notice is a plain notice with a note',
+    findByClass(noRegistryTree, 'dsh-workspace-plus-notice') !== undefined &&
+      findByClass(noRegistryTree, 'dsh-workspace-plus-note') !== undefined &&
+      findAllByClass(noRegistryTree, 'dsh-workspace-plus-notice-error').length === 0,
+  )
+}
 
-const noRegistryText = collectText(render(dialog({ initial: { ...readyState, registryAvailable: false, workspaces: [], selected: null } })))
-ok('dialog: explains a host without the workspace registry', noRegistryText.includes('workspace_dirs'), noRegistryText.slice(0, 60))
-
-const noDirsText = collectText(render(dialog({ initial: { ...readyState, workspaces: [{ id: 'ws-1', title: 'demo', path: workspaceRoot, dirs: [] }] } })))
-ok('dialog: invites a first label when the mapping is empty', noDirsText.includes('还没有登记额外目录'), noDirsText.slice(0, 60))
+{
+  const noDirsTree = render(dialog({ initial: { ...readyState, workspaces: [{ id: 'ws-1', title: 'demo', path: workspaceRoot, dirs: [] }] } }))
+  const noDirsText = collectText(noDirsTree)
+  ok(
+    'dialog: invites a first label when the mapping is empty',
+    noDirsText.includes('还没有登记目录') && !noDirsText.includes('还没有登记额外目录'),
+    noDirsText.slice(0, 60),
+  )
+  ok(
+    'dialog: the empty mapping is an empty field row with no directory rows',
+    hasClass(findByClass(noDirsTree, 'dsh-workspace-plus-empty'), 'dsh-workspace-plus-field-row') &&
+      findAllByClass(noDirsTree, 'dsh-workspace-plus-row').length === 0,
+    String(findByClass(noDirsTree, 'dsh-workspace-plus-empty')?.props?.className),
+  )
+  ok('dialog: the add row survives an empty mapping', findByClass(noDirsTree, 'dsh-workspace-plus-add') !== undefined)
+}
 clientExports.closeWorkdirsDialog()
+
+// The old table's class names are gone from the stylesheet and the markup: a
+// future edit cannot quietly restore the toolbar/label/form layout.
+{
+  const css = String(head.children[0]?.textContent ?? '')
+  const removed = ['toolbar', 'label', 'locked', 'form', 'form-row', 'path', 'path-glyph', 'path-empty']
+  // `-input-label`, `-row-path` and `-add-path` are different names, so match the
+  // exact class token rather than a substring.
+  const stillStyled = removed.filter((name) => new RegExp('\\.dsh-workspace-plus-' + name + '(?![\\w-])').test(css))
+  ok('dialog CSS: every removed class name is gone', stillStyled.length === 0, stillStyled.join(', '))
+  const removedTokens = removed.map((name) => 'dsh-workspace-plus-' + name)
+  const stillRendered = findElements(openTree, (element) => element.props?.className !== undefined)
+    .flatMap((element) => classList(element))
+    .filter((token) => removedTokens.includes(token))
+  ok('dialog: the removed class names are gone from the rendered dialog too', stillRendered.length === 0, stillRendered.join(', '))
+}
 
 ok('isOutside(): detects a sibling directory', clientExports.isOutside(workspaceRoot, docsDir) === true)
 ok('isOutside(): accepts the workspace root itself', clientExports.isOutside(workspaceRoot, workspaceRoot) === false)
@@ -1521,16 +2185,14 @@ ok('draftAfterPick(): keeps the note', pickedDraft.note === 'n')
 ok('draftAfterPick(): never overwrites a typed label', clientExports.draftAfterPick({ ...emptyDraft, label: 'api' }, 'D:\\proj\\backend').label === 'api')
 ok('draftAfterPick(): leaves the label empty when nothing is suggestible', clientExports.draftAfterPick(emptyDraft, 'D:\\项目').label === '', clientExports.draftAfterPick(emptyDraft, 'D:\\项目').label)
 
-// The path control is real DOM-reachable markup: render the dialog with a ready
+// The add row is real DOM-reachable markup: render the dialog with a ready
 // state and drive it through the picker double.
 pickerReply = { kind: 'path', value: 'D:\\proj\\backend' }
 pickerCalls = 0
 clientExports.openWorkdirsDialog('ws-1')
 const browseTree = render(dialog({ initial: readyState }))
-const browseButton = findElements(browseTree, (element) => element.type === 'button').find(
-  (b) => b.props['aria-label'] === '选择目录',
-)
-ok('dialog: renders the directory picker as the path field itself', browseButton !== undefined)
+const browseButton = findByClass(browseTree, 'dsh-workspace-plus-add')
+ok('dialog: renders the directory picker as the add row itself', browseButton !== undefined && browseButton.props['aria-label'] === '选择目录')
 ok('dialog: the picker is enabled while row buttons work', browseButton?.props.disabled === false, String(browseButton?.props.disabled))
 let browseError = null
 try {
@@ -1539,7 +2201,7 @@ try {
   browseError = error
 }
 await new Promise((resolve) => setTimeout(resolve, 0))
-ok('dialog: clicking the path field asks the shell picker', pickerCalls === 1, String(pickerCalls))
+ok('dialog: clicking the add row asks the shell picker', pickerCalls === 1, String(pickerCalls))
 ok('dialog: the picker does not throw', browseError === null, browseError?.message)
 
 // A cancelled picker returns null and must stay silent.
@@ -1547,11 +2209,17 @@ pickerReply = { kind: 'path', value: null }
 pickerCalls = 0
 browseButton?.props.onClick()
 await new Promise((resolve) => setTimeout(resolve, 0))
-ok(
-  'dialog: a cancelled pick changes nothing and reports nothing',
-  pickerCalls === 1 && collectText(render(dialog({ initial: readyState }))).includes('选择目录'),
-  String(pickerCalls),
-)
+{
+  const tree = render(dialog({ initial: readyState }))
+  ok(
+    'dialog: a cancelled pick changes nothing and reports nothing',
+    pickerCalls === 1 &&
+      collectText(findByClass(tree, 'dsh-workspace-plus-add')) === '添加目录' &&
+      findElements(tree, (element) => element.type === 'input').length === 0 &&
+      findByClass(tree, 'dsh-workspace-plus-status') === undefined,
+    String(pickerCalls),
+  )
+}
 
 // A failed picker must surface a reason rather than failing silently.
 pickerReply = { kind: 'throw', value: 'picker unavailable' }
@@ -1566,8 +2234,22 @@ await new Promise((resolve) => setTimeout(resolve, 0))
 ok(
   'dialog: a failed pick is caught and does not escape the control',
   failureEscaped === null && pickerCalls === callsBeforeFailure + 1,
-  `${failureEscaped?.message ?? ''} calls=${pickerCalls}`,
+  `${failureEscaped?.message ?? ''} calls=${String(pickerCalls)}`,
 )
+{
+  // The reason lands where an action result would — the status line — instead of
+  // throwing out of the control.
+  const session = renderWithHooks(dialog, { initial: readyState })
+  findByClass(session.tree, 'dsh-workspace-plus-add')?.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const failureTree = renderWithHooks(dialog, { initial: readyState }, session.cells).tree
+  const status = findByClass(failureTree, 'dsh-workspace-plus-status')
+  ok(
+    'dialog: a failed pick surfaces the reason in the status line',
+    collectText(status).includes('打开目录选择器失败') && hasClass(status, 'dsh-workspace-plus-error'),
+    collectText(status),
+  )
+}
 ok('dialog: the failure message names the picker', clientExports.pickErrorMessage(new Error('picker unavailable')) === '打开目录选择器失败：picker unavailable', clientExports.pickErrorMessage(new Error('picker unavailable')))
 ok('dialog: a non-Error rejection still yields a message', clientExports.pickErrorMessage('boom').includes('boom'))
 pickerReply = { kind: 'path', value: null }
@@ -1580,17 +2262,17 @@ ok('client apply(): owns the picker through a disposable effect', pickerEffect !
 pickerEffect?.dispose()
 clientExports.openWorkdirsDialog('ws-1')
 const noPickerTree = render(dialog({ initial: readyState }))
-const noPickerButton = findElements(noPickerTree, (element) => element.type === 'button').find(
-  (b) => b.props['aria-label'] === '选择目录',
-)
+const noPickerButton = findByClass(noPickerTree, 'dsh-workspace-plus-add')
 ok('dialog: the picker disables itself when no picker is mounted', noPickerButton !== undefined && noPickerButton.props.disabled === true, String(noPickerButton?.props.disabled))
 ok(
   'dialog: the disabled picker names the tool to use instead',
   String(noPickerButton?.props.title ?? '').includes('workspace_dirs'),
   String(noPickerButton?.props.title),
 )
-const noPickerAdd = findElements(noPickerTree, (element) => element.type === 'button').find((b) => collectText(b) === '添加')
-ok('dialog: the add control stays disabled without a path', noPickerAdd?.props.disabled === true, String(noPickerAdd?.props.disabled))
+ok(
+  'dialog: the add group stays without a submit when no path can be chosen',
+  findElements(noPickerTree, (element) => element.type === 'button' && collectText(element) === '添加').length === 0,
+)
 const noPickerCalls = pickerCalls
 noPickerButton?.props.onClick()
 await new Promise((resolve) => setTimeout(resolve, 0))
@@ -1605,6 +2287,31 @@ ok('@ source: is registered on the trigger registry', labelSource !== undefined,
 ok('@ source: triggers on "@"', labelSource?.trigger === '@', labelSource?.trigger)
 ok('@ source: uses a name unique to that trigger', clientExports.SOURCE_NAME !== 'reference', clientExports.SOURCE_NAME)
 ok('@ source: suppresses the pipeline group title in favour of sections', labelSource?.showGroupTitle === false)
+// The `@` roster is sorted by this field — the pipeline does
+// `sources.filter(...).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))`, and the
+// product's own groups are `reference` (no order → 0), `subagent` (0) and
+// `cordis` (1). Plugins materialize after the shell's, so an absent or merely
+// non-negative order puts 「工作区目录」 back behind them.
+{
+  const ordered = clientExports.createLabelSource()
+  ok(
+    '@ source: declares a finite numeric menu order',
+    typeof ordered?.order === 'number' && Number.isFinite(ordered.order),
+    ordered?.order === undefined ? 'undefined' : `${typeof ordered.order} ${String(ordered.order)}`,
+  )
+  ok(
+    '@ source: sorts strictly ahead of reference/subagent (0) and cordis (1)',
+    typeof ordered?.order === 'number' && ordered.order < 0,
+    String(ordered?.order),
+  )
+  // -10, not merely negative: re-tuning the menu order has to be a deliberate edit.
+  ok('@ source: pins that order to -10', ordered?.order === -10, String(ordered?.order))
+  ok(
+    '@ source: the registered source carries the same order as a fresh one',
+    labelSource?.order === ordered?.order,
+    `${String(labelSource?.order)} vs ${String(ordered?.order)}`,
+  )
+}
 ok('@ source: declares a codec so a chip can be serialized', typeof labelSource?.codec?.serialize === 'function')
 ok('@ source: registers exactly one source per plugin instance', first.sources.length === 1, String(first.sources.length))
 // The pipeline does `candidates(...).then(...)`, so a synchronous array return

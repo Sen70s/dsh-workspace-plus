@@ -7,9 +7,11 @@
  * the dialog must already be in its final state at that point.
  *
  * URL flags pick the state:
- *   ?picked=1   click the path field, so a directory is chosen and the label is
- *               filled from it
+ *   ?picked=1   press the picker row (`.dsh-workspace-plus-add`), so a directory
+ *               is chosen, its path lands in that row and the label row appears
+ *               with the guessed label
  *   ?tooltip=1  hover the "outside the workspace root" badge
+ *   ?view=settings  render the settings page instead of the dialog
  */
 const debug = document.createElement('pre')
 debug.id = 'debug'
@@ -124,8 +126,11 @@ const run = async () => {
   window.ReactDOM.flushSync(() => reactRoot.render(element))
   await null
   if (params.get('picked') === '1') {
-    const field = document.querySelector('.dsh-workspace-plus-path')
-    if (field !== null) click(field)
+    // The picker row is the only control that opens the picker; the label/note
+    // inputs do not exist until a directory has been chosen, so the draft row
+    // below is created by this click.
+    const picker = document.querySelector('.dsh-workspace-plus-add')
+    if (picker !== null) click(picker)
     await sandbox.picker.lastResult
     await null
     window.ReactDOM.flushSync(() => {})
@@ -142,11 +147,21 @@ const run = async () => {
     await null
   }
   document.title = 'ready'
+  // The tooltip bubble (the badge's `delayMs` is 120ms) and the settings switches
+  // land in effects scheduled after those awaits, so let a timer pass before
+  // counting: `__preview` is a plain snapshot, and read too early it reports the
+  // intermediate DOM.
+  await new Promise((resolve) => setTimeout(resolve, 300))
   window.__preview = {
+    // Directory rows only: the add row and the empty row are field rows.
     rows: document.querySelectorAll('.dsh-workspace-plus-row').length,
+    fieldRows: document.querySelectorAll('.dsh-workspace-plus-field-row').length,
     badges: document.querySelectorAll('.dsh-workspace-plus-row-outside').length,
     bubbles: document.querySelectorAll('[role="tooltip"]').length,
     switches: document.querySelectorAll('[role="switch"]').length,
+    inputs: document.querySelectorAll('.dsh-workspace-plus-input').length,
+    draft: document.querySelectorAll('.dsh-workspace-plus-draft').length,
+    addText: document.querySelector('.dsh-workspace-plus-add-text')?.textContent ?? null,
     cardWidth: document.querySelector('[role="dialog"]')?.getBoundingClientRect().width,
     pickerCalls: window.__pickerCalls,
   }

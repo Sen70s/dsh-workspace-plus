@@ -3,6 +3,7 @@ node_modules/
 *.tgz
 *.log
 .DS_Store
+.acl-repair/
 
 # tools/preview: the harness is committed, the shell assets it renders against
 # are extracted from the local DSH install (see tools/preview/README.md).

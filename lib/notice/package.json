@@ -1,0 +1,6 @@
+{
+  "name": "dsh-workspace-plus-notice",
+  "description": "Windows native notifications for running conversations: permission requests, questions, finished, interrupted and failed turns, each marked with its kind. Click a notification to open that conversation. Merged from the dsh-notice plugin as a sub-feature.",
+  "icon": "./icon.svg",
+  "type": "module"
+}

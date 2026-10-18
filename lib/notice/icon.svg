@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="dsh-notice">
+  <!-- A notification bell over the Harness's signal colour: the plugin is the
+       moment a conversation turns to face the user. -->
+  <defs>
+    <linearGradient id="bell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4d8dff"/>
+      <stop offset="1" stop-color="#2470e8"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#0f1420"/>
+  <path d="M32 12c-7.2 0-13 5.8-13 13v9.4l-3.6 6.1a2 2 0 0 0 1.7 3h29.8a2 2 0 0 0 1.7-3L45 34.4V25c0-7.2-5.8-13-13-13Z"
+        fill="url(#bell)"/>
+  <path d="M26.6 46.4a5.6 5.6 0 0 0 10.8 0Z" fill="#8fb6ff"/>
+  <circle cx="45.5" cy="19.5" r="6.5" fill="#ff5b4a"/>
+  <circle cx="45.5" cy="19.5" r="2.6" fill="#0f1420" opacity=".55"/>
+</svg>

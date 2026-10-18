@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Notice (desktop notifications)",
+    "description": "Windows native notifications for running conversations: permission requests, questions, finished, interrupted and failed turns, each marked with its kind. Click a notification to open that conversation."
+  }
+}

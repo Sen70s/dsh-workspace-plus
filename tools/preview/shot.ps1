@@ -1,5 +1,10 @@
-# Screenshot a local page with headless Edge, retrying because the browser
-# intermittently exits without writing the file.
+# Screenshot a local page with headless Edge.
+#
+# Edge's launcher process returns before the browser has written the PNG, and how
+# long that takes varies with the page, so this polls for the file rather than
+# sleeping a fixed amount. It never deletes an existing output before a new one
+# has landed: a retry loop that cleaned up first could destroy a screenshot that
+# was merely written late, leaving the repo with no image at all.
 param(
   [Parameter(Mandatory = $true)][string]$Url,
   [Parameter(Mandatory = $true)][string]$Out,
@@ -7,19 +12,27 @@ param(
   [int]$Height = 1000
 )
 $edge = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+$OutFull = [System.IO.Path]::GetFullPath($Out)
 for ($attempt = 1; $attempt -le 4; $attempt++) {
-  if (Test-Path -LiteralPath $Out) { Remove-Item -LiteralPath $Out -Force }
+  $started = Get-Date
   $profile = Join-Path $env:TEMP ("dsh-wsp-shot-" + [guid]::NewGuid().ToString('N'))
   & $edge --headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=1 `
     --window-size="$Width,$Height" --virtual-time-budget=8000 `
-    --user-data-dir="$profile" --screenshot="$Out" $Url 2>$null | Out-Null
-  Start-Sleep -Milliseconds 400
-  if (Test-Path -LiteralPath $Out) {
-    "ok (attempt $attempt): $Out $((Get-Item -LiteralPath $Out).Length) bytes"
-    Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue
-    exit 0
+    --user-data-dir="$profile" --screenshot="$OutFull" $Url 2>$null | Out-Null
+  $deadline = (Get-Date).AddSeconds(20)
+  $written = $false
+  while ((Get-Date) -lt $deadline) {
+    if ((Test-Path -LiteralPath $OutFull) -and ((Get-Item -LiteralPath $OutFull).LastWriteTime -gt $started)) {
+      $written = $true
+      break
+    }
+    Start-Sleep -Milliseconds 150
   }
   Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue
+  if ($written) {
+    "ok (attempt $attempt): $OutFull $((Get-Item -LiteralPath $OutFull).Length) bytes"
+    exit 0
+  }
 }
-"failed: $Out"
+"failed: $OutFull"
 exit 1
