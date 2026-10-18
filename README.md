@@ -4,7 +4,7 @@
 [![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/sen70s/dsh-workspace-plus)
 [![license](https://img.shields.io/npm/l/dsh-workspace-plus.svg)](https://github.com/Sen70s/dsh-workspace-plus/blob/main/LICENSE)
 
-**当前版本 `v0.6.0`** · 要求 DSH `>=0.1.7-rc.2`
+**当前版本 `v0.6.1`** · 要求 DSH `>=0.1.7-rc.2`
 
 DeepSeek Harness（DSH）的插件。一个插件，两个子功能，插件页里各占一行、可单独启停。
 

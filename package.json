@@ -1,6 +1,6 @@
 {
   "name": "dsh-workspace-plus",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "DeepSeek Harness plugin with two switchable sub-features: workspace+ (label several directories inside one workspace and reference them by absolute path — the @ composer source, the row button, the workspace_dirs tool) and 通知/notice (Windows native notifications for running conversations, merged from dsh-notice). Each sub-feature is its own loader row and can be toggled on the plugin page.",
   "icon": "icon.svg",
   "type": "module",
