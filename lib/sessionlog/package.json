@@ -1,6 +1,0 @@
-{
-  "name": "dsh-workspace-plus-sessionlog",
-  "description": "在使用官方模型 API 时上传 Session Log（帮助改进 DeepSeek 模型与产品）的子模块版本：默认关闭，除官方适配器的请求字段外，还通过 DSH 自带的 OTLP 通道把会话日志送到 DeepSeek collector —— 因此换用第三方模型 API 时同样生效。",
-  "icon": "./icon.svg",
-  "type": "module"
-}

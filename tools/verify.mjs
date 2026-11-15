@@ -4,13 +4,12 @@
  * Run with: node tools/verify.mjs
  *
  * It validates the bundle **without installing it into a profile and without a
- * running DSH**: the package manifest, the loader patch, all three sub-features
- * (workspace+, notice, sessionlog), the notice click launcher (the compiled
+ * running DSH**: the package manifest, the loader patch, both sub-features
+ * (workspace+, notice), the notice click launcher (the compiled
  * helper and its PowerShell fallbacks; the real helper is built with the .NET
  * Framework compiler when this machine has one, and that check is skipped when
  * it does not), the store logic, the prompt contribution, the Tool, the HTTP
  * routes, the exact slot registrations, the dialog's external store, the
- * session-log wire format and both of its upload channels, and the DOM-level
  * workspace-row button (against a minimal DOM double).
  *
  * The host half runs against a fake Cordis context and a temporary `DSH_HOME`,
@@ -68,12 +67,9 @@ ok('package.json: exports["."] points at the host half', pkg.exports?.['.']?.def
 ok('package.json: exports["./client"] points at the browser half', pkg.exports?.['./client']?.default === './lib/client.js')
 ok('package.json: exports["./package.json"] is exposed', pkg.exports?.['./package.json'] === './package.json')
 // Sub-feature subpaths are the loader rows' resolution contract. `./notice` was
-// never asserted before, so both are pinned here.
-for (const [sub, entry] of [
-  ['notice', 'lib/notice/index.js'],
-  ['sessionlog', 'lib/sessionlog/index.js'],
-]) {
-  ok(`package.json: exports["./${sub}"] points at the sub-feature host half`, pkg.exports?.[`./${sub}`]?.default === `./${entry}`, pkg.exports?.[`./${sub}`]?.default)
+// Sub-feature subpaths are the loader rows' resolution contract. `./notice` was
+// never asserted before, so it is pinned here.
+for (const [sub, entry] of [['notice', 'lib/notice/index.js']]) {
   ok(`package.json: exports["./${sub}"] target exists`, existsSync(join(ROOT, entry)))
   ok(`package.json: exports["./${sub}/package.json"] is exposed and exists`, pkg.exports?.[`./${sub}/package.json`] === `./lib/${sub}/package.json` && existsSync(join(ROOT, `lib/${sub}/package.json`)))
   ok(`package.json: exports["./${sub}/locale/*.json"] is exposed and ships zh + en`, pkg.exports?.[`./${sub}/locale/*.json`] === `./lib/${sub}/locale/*.json` && existsSync(join(ROOT, `lib/${sub}/locale/zh.json`)) && existsSync(join(ROOT, `lib/${sub}/locale/en.json`)))
@@ -101,20 +97,18 @@ const insertedIds = [...patch.matchAll(/^\s*(?:-\s*)?id:\s*['"]?([^'"\n#]+?)['"]
 
 ok('cordis.patch.yml: contains an insert list', /^-\s*insert:\s*$/m.test(patch))
 ok('cordis.patch.yml: has no tab indentation', !/^\t/m.test(patch))
-// Three rows, three switchable sub-features: the package-root workspace+ row,
-// the ported notice sub-feature (dsh-notice merged in as `./notice`) and the
-// session-log upload sub-feature (`./sessionlog`, off by default).
+// Two rows, two switchable sub-features: the package-root workspace+ row and
+// the ported notice sub-feature (dsh-notice merged in as `./notice`).
 ok(
-  'cordis.patch.yml: inserts exactly the three sub-feature rows by name',
-  insertedNames.length === 3 &&
+  'cordis.patch.yml: inserts exactly the two sub-feature rows by name',
+  insertedNames.length === 2 &&
     insertedNames[0] === pkg.name &&
-    insertedNames[1] === `${pkg.name}/notice` &&
-    insertedNames[2] === `${pkg.name}/sessionlog`,
+    insertedNames[1] === `${pkg.name}/notice`,
   insertedNames.join(', '),
 )
 ok(
-  'cordis.patch.yml: the rows have the stable ids workspaceplus, notice and sessionlog',
-  insertedIds.length === 3 && insertedIds[0] === 'workspaceplus' && insertedIds[1] === 'notice' && insertedIds[2] === 'sessionlog',
+  'cordis.patch.yml: the rows have the stable ids workspaceplus and notice',
+  insertedIds.length === 2 && insertedIds[0] === 'workspaceplus' && insertedIds[1] === 'notice',
   insertedIds.join(', '),
 )
 
@@ -1220,442 +1214,6 @@ ok(
 }
 
 // ---------------------------------------------------------------------------
-// 4.6 The 会话日志 sub-feature — host half
-// ---------------------------------------------------------------------------
-// The `sessionlog` loader row resolves to `lib/sessionlog/index.js`. It ships
-// OFF, it must never depend on anything but Node builtins, and its two channels
-// must be independently observable: the provider-independent OTLP channel, and
-// the `dsh_session_log` request field it only contributes when nothing else
-// owns that field.
-const sessionlogHost = await import(pathToFileURL(join(ROOT, 'lib/sessionlog/index.js')).href)
-const sessionlogSettings = await import(pathToFileURL(join(ROOT, 'lib/sessionlog/settings.js')).href)
-const sessionlogWire = await import(pathToFileURL(join(ROOT, 'lib/sessionlog/wire.js')).href)
-const sessionlogRedact = await import(pathToFileURL(join(ROOT, 'lib/sessionlog/redact.js')).href)
-
-ok('lib/sessionlog/index.js: exports the row module name', sessionlogHost.name === 'dsh-workspace-plus/sessionlog', sessionlogHost.name)
-ok('lib/sessionlog/index.js: exports apply()', typeof sessionlogHost.apply === 'function')
-ok('lib/sessionlog/index.js: declares its API path', sessionlogHost.API_PATH === '/dsh-sessionlog/api', sessionlogHost.API_PATH)
-ok('lib/sessionlog/index.js: imports only Node builtins and sibling modules', !/^\s*import\s[^\n]*from\s+'(?!node:|\.\/)/m.test(read('lib/sessionlog/index.js')))
-ok('lib/sessionlog/wire.js: imports only Node builtins and sibling modules', !/^\s*import\s[^\n]*from\s+'(?!node:|\.\/)/m.test(read('lib/sessionlog/wire.js')))
-ok('lib/sessionlog/settings.js: imports only Node builtins and sibling modules', !/^\s*import\s[^\n]*from\s+'(?!node:|\.\/)/m.test(read('lib/sessionlog/settings.js')))
-ok('lib/sessionlog/redact.js: imports nothing at all', !/^\s*import\s/m.test(read('lib/sessionlog/redact.js')))
-ok('lib/sessionlog/package.json: declares its own name and icon', (() => {
-  const sub = JSON.parse(read('lib/sessionlog/package.json'))
-  return typeof sub.name === 'string' && sub.name.length > 0 && typeof sub.icon === 'string' && sub.icon.startsWith('./')
-})())
-ok('lib/sessionlog/locale: ships zh + en display metadata', existsSync(join(ROOT, 'lib/sessionlog/locale/zh.json')) && existsSync(join(ROOT, 'lib/sessionlog/locale/en.json')))
-for (const lang of ['zh', 'en']) {
-  const dict = JSON.parse(read(`lib/sessionlog/locale/${lang}.json`))
-  ok(
-    `lib/sessionlog/locale/${lang}.json: meta.title and meta.description are non-empty`,
-    typeof dict.meta?.title === 'string' && dict.meta.title.length > 0 && typeof dict.meta?.description === 'string' && dict.meta.description.length > 0,
-  )
-}
-
-// --- pure settings layer ----------------------------------------------------
-{
-  const defaults = sessionlogSettings.normalizeSettings({})
-  ok(
-    'sessionlog settings: ships OFF with the documented defaults',
-    defaults.enabled === false &&
-      defaults.endpoint === '' &&
-      defaults.requestField === false &&
-      defaults.includeHistory === true &&
-      defaults.maxRequestBytes === 4000000 &&
-      defaults.shutdownTimeoutMillis === 3000,
-    JSON.stringify(defaults),
-  )
-  ok(
-    'sessionlog settings: an absent or blank count falls back instead of collapsing to zero',
-    sessionlogSettings.normalizeSettings({ maxRequestBytes: undefined }).maxRequestBytes === 4000000 &&
-      sessionlogSettings.normalizeSettings({ maxRequestBytes: '' }).maxRequestBytes === 4000000 &&
-      sessionlogSettings.normalizeSettings({ shutdownTimeoutMillis: '  ' }).shutdownTimeoutMillis === 3000,
-  )
-  ok('sessionlog settings: the store lives under sessionlog/', sessionlogSettings.storePath({ DSH_HOME: work }) === join(work, 'sessionlog', 'settings.json'))
-  ok('sessionlog settings: YAML-style strings coerce instead of flipping the switch', sessionlogSettings.normalizeSettings({ enabled: 'false' }).enabled === false && sessionlogSettings.normalizeSettings({ enabled: 'off' }).enabled === false)
-  ok('sessionlog settings: an explicit true still wins', sessionlogSettings.normalizeSettings({ enabled: 'yes' }).enabled === true)
-  ok('sessionlog settings: a bad endpoint falls back to the default instead of being used', sessionlogSettings.normalizeSettings({ endpoint: 'ftp://nope/v1/logs' }).endpoint === '')
-  ok('sessionlog settings: a good endpoint is normalized', sessionlogSettings.normalizeSettings({ endpoint: ' https://collector.example/v1/logs ' }).endpoint === 'https://collector.example/v1/logs')
-  ok('sessionlog settings: counts are clamped to the documented ceilings', sessionlogSettings.normalizeSettings({ maxRequestBytes: 10 ** 12 }).maxRequestBytes === 4000000)
-  ok('sessionlog settings: bundle config and overrides compose', sessionlogSettings.composeSettings({ enabled: true }, { enabled: false }).enabled === false && sessionlogSettings.composeSettings({ enabled: false }, {}).enabled === false)
-  ok('sessionlog settings: an override map drops unknown keys', JSON.stringify(sessionlogSettings.mergeOverrides({ enabled: true, nope: 1, endpoint: 'https://a.example' })) === JSON.stringify({ enabled: true, endpoint: 'https://a.example' }))
-  ok('sessionlog settings: a default-valued patch drops the override', JSON.stringify(sessionlogSettings.clearOverride({ enabled: true, requestField: false }, 'enabled')) === JSON.stringify({ requestField: false }))
-  ok('sessionlog settings: a corrupt store degrades to defaults without throwing', (() => {
-    const broken = join(work, 'broken-store.json')
-    writeFileSync(broken, '{not json', 'utf8')
-    const read = sessionlogSettings.readStore(broken)
-    return read.overrides.enabled === undefined && Object.keys(read.accepted).length === 0
-  })())
-  ok('sessionlog settings: a store round-trips overrides and acceptance watermarks', (() => {
-    const file = join(work, 'sessionlog-roundtrip.json')
-    const written = sessionlogSettings.writeStore(file, { overrides: { enabled: true }, accepted: { 'session-1': { formatVersion: 4, throughSeq: 7 } } })
-    const back = sessionlogSettings.readStore(file)
-    return written.ok && back.overrides.enabled === true && back.accepted['session-1'].throughSeq === 7 && back.accepted['session-1'].formatVersion === 4
-  })())
-  ok('sessionlog settings: a malformed acceptance watermark is dropped', Object.keys(sessionlogSettings.normalizeAccepted({ a: { formatVersion: 4, throughSeq: -1 }, b: { formatVersion: 4, throughSeq: 2 } })).join(',') === 'b')
-  ok(
-    'sessionlog settings: the endpoint prefers settings, then the environment, then the shipping collector',
-    sessionlogSettings.resolveEndpoint({ endpoint: 'https://chosen.example/v1/logs' }, { DSH_TELEMETRY_OTLP_URL: 'https://env.example/v1/logs' }) === 'https://chosen.example/v1/logs' &&
-      sessionlogSettings.resolveEndpoint({ endpoint: '' }, { DSH_TELEMETRY_OTLP_URL: 'https://env.example/v1/logs' }) === 'https://env.example/v1/logs' &&
-      sessionlogSettings.resolveEndpoint({ endpoint: '' }, {}) === sessionlogSettings.DEFAULT_ENDPOINT,
-  )
-  ok('sessionlog settings: the shipping collector is the one the base profile already uses', sessionlogSettings.DEFAULT_ENDPOINT === 'https://dsh-otel-collector.deepseeksvc.com/v1/logs')
-  const idHome = join(work, 'id-home')
-  mkdirSync(idHome, { recursive: true })
-  const firstId = sessionlogSettings.anonymousUserId({ DSH_HOME: idHome })
-  ok('sessionlog settings: the anonymous user id is a UUID shared with DSH telemetry', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(firstId), firstId)
-  ok('sessionlog settings: the anonymous user id is stable across calls', sessionlogSettings.anonymousUserId({ DSH_HOME: idHome }) === firstId)
-  // The host's own opt-out must outrank this plugin's switch, or the plugin
-  // becomes a way around it. DSH treats ANY non-empty value as "off".
-  ok('sessionlog settings: a clean environment has no kill switch', sessionlogSettings.telemetryKillSwitch({}) === null)
-  ok(
-    'sessionlog settings: DSH_TELEMETRY_DISABLED of any value suppresses uploading',
-    ['1', 'true', '0', 'false', 'yes'].every((value) => sessionlogSettings.telemetryKillSwitch({ DSH_TELEMETRY_DISABLED: value }) !== null),
-  )
-  ok('sessionlog settings: DSH_TELEMETRY_MODE=DISABLED suppresses uploading', sessionlogSettings.telemetryKillSwitch({ DSH_TELEMETRY_MODE: 'disabled' }) !== null)
-  ok(
-    'sessionlog settings: an opted-out process cannot be switched on from the page',
-    sessionlogSettings.uploadBlockedBy({ enabled: true }, { DSH_TELEMETRY_DISABLED: '1' }) !== null &&
-      sessionlogSettings.uploadBlockedBy({ enabled: true }, {}) === null &&
-      sessionlogSettings.uploadBlockedBy({ enabled: false }, {}) !== null,
-  )
-}
-
-// --- pure wire layer --------------------------------------------------------
-{
-  const events = [
-    { seq: 0, type: 'user/message', time: 10, data: { text: 'hi' }, surfaceOp: 'append' },
-    { seq: 1, type: 'tool/result', time: 11, data: { message: { isError: true } } },
-    { seq: 2, type: 'turn/end', time: 12, data: { reason: { kind: 'completed' } } },
-  ]
-  const session = {
-    id: 'session-wire',
-    header: { version: 4, id: 'session-wire', createdAt: 1, cwd: 'D:\\work' },
-    inheritedEventCount: 0,
-    firstLifecycleSeq: 0,
-    seq: events.length,
-    eventAt: (index) => events[Number(index)],
-    snapshotEvents: (from = 0) => events.slice(Number(from)),
-  }
-  ok('sessionlog wire: severity follows the event outcome', sessionlogWire.severityOf(events[1]) === 'error' && sessionlogWire.severityOf(events[0]) === 'info')
-  ok('sessionlog wire: a failed turn end is an error', sessionlogWire.severityOf({ type: 'turn/end', data: { reason: { kind: 'error' } } }) === 'error')
-  const record = sessionlogWire.sessionLogRecord(session, events[0])
-  ok(
-    'sessionlog wire: a record carries the session id, the whole event and identity attributes',
-    record.sessionId === 'session-wire' &&
-      record.event.seq === 0 &&
-      record.event.data.text === 'hi' &&
-      record.severityNumber === 9 &&
-      record.attributes['session.id'] === 'session-wire' &&
-      record.attributes['event.type'] === 'user/message' &&
-      record.attributes['session.format_version'] === 4,
-  )
-  ok('sessionlog wire: the OTLP scope is namespaced to this sub-feature', sessionlogWire.SCOPE_NAME.startsWith('dsh-workspace-plus/'))
-  ok('sessionlog wire: jsonBytes refuses an unserializable value', sessionlogWire.jsonBytes({ toJSON() { throw new Error('nope') } }) === Number.POSITIVE_INFINITY)
-  const built = sessionlogWire.buildRequestField({ session, afterSeq: -1, maxBytes: 1_000_000 })
-  ok('sessionlog wire: the request field is the shipped v1 envelope', built.value.version === 1 && built.value.sessionFormatVersion === 4 && built.value.afterSeq === -1 && built.value.throughSeq === 2 && built.value.events.length === 3)
-  ok('sessionlog wire: the request field is bounded by maxBytes', sessionlogWire.buildRequestField({ session, afterSeq: -1, maxBytes: 1 }) === undefined)
-  const partial = sessionlogWire.buildRequestField({ session, afterSeq: -1, maxBytes: sessionlogWire.jsonBytes(built.value) - 1 })
-  ok('sessionlog wire: a byte ceiling below the last event leaves it for the next request', partial === undefined || partial.value.throughSeq < 2, JSON.stringify(partial?.value?.throughSeq))
-  ok('sessionlog wire: nothing new yields no field at all', sessionlogWire.buildRequestField({ session, afterSeq: 2, maxBytes: 1_000_000 }) === undefined)
-}
-
-// --- wired behaviour: both channels, against a fake Cordis context ----------
-{
-  const makeSession = (id, types) => {
-    const events = types.map((type, seq) => ({
-      seq,
-      type,
-      time: 100 + seq,
-      data: { n: seq },
-      ...(type === 'user/message' || type === 'assistant/message' ? { surfaceOp: 'append' } : {}),
-    }))
-    return {
-      id,
-      header: { version: 4, id, createdAt: 1, cwd: 'D:\\work' },
-      inheritedEventCount: 0,
-      firstLifecycleSeq: 0,
-      get seq() {
-        return events.length
-      },
-      eventAt: (index) => events[Number(index)],
-      snapshotEvents: (from = 0) => events.slice(Number(from)),
-      push(type) {
-        const next = {
-          seq: events.length,
-          type,
-          time: 500 + events.length,
-          data: { n: events.length },
-          ...(type === 'user/message' || type === 'assistant/message' ? { surfaceOp: 'append' } : {}),
-        }
-        events.push(next)
-        return next
-      },
-    }
-  }
-
-  const makeSessionlogCtx = ({ fieldTaken, sessions }) => {
-    const captured = { routes: new Map(), listeners: new Map(), effects: [], warns: [], infos: [], reporters: [], registrations: [], providers: new Map() }
-    if (fieldTaken === true) captured.providers.set('dsh_session_log', {})
-    const ctx = {
-      logger: {
-        warn: (...parts) => captured.warns.push(parts.map(String).join(' ')),
-        info: (...parts) => captured.infos.push(parts.map(String).join(' ')),
-      },
-      get: () => undefined,
-      on: (event, handler) => captured.listeners.set(event, handler),
-      effect: (fn, label) => {
-        captured.effects.push(String(label))
-        return fn()
-      },
-      inject: (deps, callback) => {
-        const scope = {
-          on: (event, handler) => captured.listeners.set(event, handler),
-          effect: (fn, label) => {
-            captured.effects.push(String(label))
-            return fn()
-          },
-        }
-        if (deps.includes('otel')) {
-          scope.otel = {
-            createSessionLogReporter: (options) => {
-              const channel = {
-                options,
-                records: [],
-                shutdown: async () => {},
-                stopPending: () => {},
-                reportSessionLog: (record) => channel.records.push(record),
-              }
-              captured.reporters.push(channel)
-              return channel
-            },
-          }
-        }
-        if (deps.includes('deepseekLlmApiExtensions')) {
-          scope.deepseekLlmApiExtensions = {
-            providers: captured.providers,
-            register: (field, provider) => {
-              captured.registrations.push({ field, provider })
-              captured.providers.set(field, provider)
-              return () => captured.providers.delete(field)
-            },
-          }
-        }
-        if (deps.includes('webServer')) {
-          scope.webServer = {
-            register: (route) => {
-              captured.routes.set(route.path, { route, handler: route.handler })
-              return () => {}
-            },
-          }
-        }
-        callback(scope)
-      },
-    }
-    ctx.sessions = {
-      list: () => sessions,
-      get: (id) => sessions.find((session) => String(session.id) === String(id)),
-    }
-    return { ctx, captured }
-  }
-
-  // 1. Off by default: the route exists, nothing is uploaded, nothing is registered.
-  {
-    const session = makeSession('session-off', ['user/message'])
-    const { ctx, captured } = makeSessionlogCtx({ sessions: [session] })
-    let error = null
-    try {
-      sessionlogHost.apply(ctx, {})
-    } catch (thrown) {
-      error = thrown
-    }
-    ok('sessionlog host: apply() registers without throwing', error === null, error?.message)
-    ok('sessionlog host: registers its JSON route', captured.routes.has('/dsh-sessionlog/api'), [...captured.routes.keys()].join(', '))
-    ok('sessionlog host: owns its upload channel through ctx.effect', captured.effects.some((label) => label.includes('teardown')), captured.effects.join(' | '))
-    ok('sessionlog host: the request field is registered when nothing owns it', captured.registrations.some((entry) => entry.field === 'dsh_session_log'), JSON.stringify(captured.registrations.map((entry) => entry.field)))
-    ok('sessionlog host: switched off means no channel and no upload', captured.reporters.length === 0 && captured.listeners.get('session/event') !== undefined)
-    await captured.listeners.get('session/event')(session, session.snapshotEvents(0)[0])
-    ok('sessionlog host: an event while switched off uploads nothing', captured.reporters.length === 0)
-
-    const getResponse1 = fakeResponse()
-    await captured.routes.get('/dsh-sessionlog/api').handler(fakeRequest('GET'), getResponse1)
-    const payload = JSON.parse(getResponse1.body)
-    ok('sessionlog route(GET): answers 200 JSON', getResponse1.status === 200 && getResponse1.headers['content-type'].startsWith('application/json'))
-    ok('sessionlog route(GET): reports the switch as off', payload.settings.enabled === false)
-    ok('sessionlog route(GET): reports the OTLP channel as available', payload.channel.otlpAvailable === true && payload.channel.reporting === false)
-    ok('sessionlog route(GET): reports the request-field channel as active here', payload.channel.requestField === 'active', payload.channel.requestField)
-    ok('sessionlog route(GET): reports the effective endpoint and where it came from', payload.effectiveEndpoint === sessionlogSettings.DEFAULT_ENDPOINT && payload.endpointSource === 'default')
-
-    // Turning it on through the route must start the channel and replay the live session.
-    const postResponse = fakeResponse()
-    await captured.routes.get('/dsh-sessionlog/api').handler(fakeRequest('POST', { op: 'patch', patch: { enabled: true, requestField: true } }), postResponse)
-    const posted = JSON.parse(postResponse.body)
-    ok('sessionlog route(POST): enabling persists and starts uploading', posted.ok === true && posted.settings.enabled === true, posted.message)
-    ok('sessionlog route(POST): the request-field fallback is opt-in and reported as chosen', posted.settings.requestField === true)
-    ok('sessionlog route(POST): the channel is created on enable', captured.reporters.length === 1, String(captured.reporters.length))
-    ok('sessionlog route(POST): the live session history is replayed on enable', captured.reporters[0].records.length === 1, String(captured.reporters[0].records.length))
-    ok(
-      'sessionlog route(POST): the reported record is the canonical event with identity attributes',
-      captured.reporters[0].records[0].sessionId === 'session-off' && captured.reporters[0].records[0].attributes['session.id'] === 'session-off',
-    )
-    ok(
-      'sessionlog route(POST): the channel targets the resolved endpoint and the anonymous user id file',
-      captured.reporters[0].options.exporter.url === sessionlogSettings.DEFAULT_ENDPOINT &&
-        captured.reporters[0].options.scope.name === sessionlogWire.SCOPE_NAME &&
-        typeof captured.reporters[0].options.resourceAttributes['user.id'] === 'string',
-    )
-
-    // Live events keep flowing, and an event already handed over is never repeated.
-    await captured.listeners.get('session/event')(session, session.snapshotEvents(0)[0])
-    ok('sessionlog host: a repeated sequence is not uploaded twice', captured.reporters[0].records.length === 1, String(captured.reporters[0].records.length))
-
-    // Changing the endpoint rebuilds the channel instead of writing to the old one.
-    const reportersBefore = captured.reporters.length
-    const endpointResponse = fakeResponse()
-    await captured.routes.get('/dsh-sessionlog/api').handler(fakeRequest('POST', { op: 'patch', patch: { endpoint: 'https://alt.example/v1/logs' } }), endpointResponse)
-    ok('sessionlog route(POST): a new endpoint rebuilds the channel', captured.reporters.length === reportersBefore + 1, String(captured.reporters.length))
-    ok(
-      'sessionlog route(POST): the rebuilt channel targets the chosen endpoint and reports its source',
-      captured.reporters.at(-1).options.exporter.url === 'https://alt.example/v1/logs' && JSON.parse(endpointResponse.body).endpointSource === 'settings',
-      captured.reporters.at(-1).options.exporter.url,
-    )
-
-    // The request field rides the same switch.
-    const provider = captured.registrations.find((entry) => entry.field === 'dsh_session_log')?.provider
-    const prepared = provider.prepare({ sessionId: 'session-off' })
-    ok('sessionlog request field: a live session yields a v1 field', prepared !== undefined && prepared.value.version === 1 && prepared.value.events.length >= 1)
-    prepared.accept()
-    const afterAccept = provider.prepare({ sessionId: 'session-off' })
-    ok('sessionlog request field: acceptance advances the watermark so nothing is resent', afterAccept === undefined)
-    ok('sessionlog request field: a request without a live session carries no field', provider.prepare({}) === undefined)
-
-    const resetResponse = fakeResponse()
-    await captured.routes.get('/dsh-sessionlog/api').handler(fakeRequest('POST', { op: 'reset' }), resetResponse)
-    const reset = JSON.parse(resetResponse.body)
-    ok('sessionlog route(POST reset): restores the shipped defaults', reset.ok === true && reset.settings.enabled === false, reset.message)
-    ok('sessionlog route(POST reset): tears the upload channel down', reset.channel.reporting === false)
-  }
-
-  // 2. The field is already owned (the shipped profile): the fallback must step aside.
-  {
-    const session = makeSession('session-taken', ['user/message'])
-    const { ctx, captured } = makeSessionlogCtx({ fieldTaken: true, sessions: [session] })
-    let error = null
-    try {
-      sessionlogHost.apply(ctx, { enabled: true, includeHistory: false })
-    } catch (thrown) {
-      error = thrown
-    }
-    ok('sessionlog host: a taken request field never fails the row', error === null, error?.message)
-    ok('sessionlog host: a taken request field is not re-registered', captured.registrations.length === 0, JSON.stringify(captured.registrations.map((entry) => entry.field)))
-    ok('sessionlog host: the primary OTLP channel still runs when the field is taken', captured.reporters.length === 1, String(captured.reporters.length))
-    ok('sessionlog host: includeHistory off leaves the pre-existing prefix alone', captured.reporters[0].records.length === 0, String(captured.reporters[0].records.length))
-    const fresh = session.push('user/message')
-    await captured.listeners.get('session/event')(session, fresh)
-    ok('sessionlog host: the OTLP channel uploads for a non-DeepSeek deployment', captured.reporters[0].records.length === 1, String(captured.reporters[0].records.length))
-    const getResponse2 = fakeResponse()
-    await captured.routes.get('/dsh-sessionlog/api').handler(fakeRequest('GET'), getResponse2)
-    const payload2 = JSON.parse(getResponse2.body)
-    ok('sessionlog route(GET): reports the request field as taken', payload2.channel.requestField === 'taken', payload2.channel.requestField)
-    ok('sessionlog route(GET): explains why the request field is skipped', typeof payload2.channel.requestFieldError === 'string' && payload2.channel.requestFieldError.includes('dsh_session_log'))
-  }
-
-  // 3. A body that is not JSON, and an unknown op, are rejected without losing the snapshot.
-  {
-    const { ctx, captured } = makeSessionlogCtx({ sessions: [] })
-    sessionlogHost.apply(ctx, {})
-    const handler = captured.routes.get('/dsh-sessionlog/api').handler
-    const badJson = fakeResponse()
-    await handler({ method: 'POST', async *[Symbol.asyncIterator]() { yield Buffer.from('{nope', 'utf8') } }, badJson)
-    ok('sessionlog route(POST): a body that is not JSON answers 400', badJson.status === 400)
-    const unknown = fakeResponse()
-    await handler(fakeRequest('POST', { op: 'nope' }), unknown)
-    ok('sessionlog route(POST): an unknown op answers 400', unknown.status === 400 && JSON.parse(unknown.body).message.includes('unknown op'))
-    const badKey = fakeResponse()
-    await handler(fakeRequest('POST', { op: 'patch', patch: { nope: true } }), badKey)
-    ok('sessionlog route(POST): an unknown setting key answers 400', badKey.status === 400 && JSON.parse(badKey.body).message.includes('未知设置项'))
-    const badValue = fakeResponse()
-    await handler(fakeRequest('POST', { op: 'patch', patch: { enabled: 'banana' } }), badValue)
-    ok('sessionlog route(POST): an unusable value for the master switch answers 400', badValue.status === 400 && JSON.parse(badValue.body).message.includes('布尔值'))
-    const badEndpoint = fakeResponse()
-    await handler(fakeRequest('POST', { op: 'patch', patch: { endpoint: 'ftp://nope' } }), badEndpoint)
-    ok('sessionlog route(POST): a non-http endpoint answers 400 instead of being used', badEndpoint.status === 400)
-    const methodNotAllowed = fakeResponse()
-    await handler(fakeRequest('PUT'), methodNotAllowed)
-    ok('sessionlog route: a non-GET/POST method answers 405', methodNotAllowed.status === 405)
-  }
-}
-
-// --- redaction: no outbound path may ship a credential ----------------------
-{
-  const npmToken = 'npm_' + 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0'
-  const githubToken = 'ghp_' + 'Z'.repeat(36)
-  ok('sessionlog redact: an npm token is scrubbed', sessionlogRedact.redactText(npmToken) === `npm_${sessionlogRedact.REDACTED}`, sessionlogRedact.redactText(npmToken))
-  ok(
-    'sessionlog redact: a legacy _authToken line keeps its key and loses its value',
-    sessionlogRedact
-      .redactText(`npm config set //registry.npmjs.org/:_authToken=${npmToken}`)
-      .endsWith(`_authToken=${sessionlogRedact.REDACTED}`),
-  )
-  ok('sessionlog redact: a GitHub token is scrubbed', !sessionlogRedact.redactText(githubToken).includes('ZZZZZZZZ'))
-  ok(
-    'sessionlog redact: a Bearer credential is scrubbed but the scheme survives',
-    sessionlogRedact.redactText('Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123') === `Authorization: Bearer ${sessionlogRedact.REDACTED}`,
-  )
-  ok(
-    'sessionlog redact: credentials embedded in a URL are scrubbed, the host survives',
-    sessionlogRedact.redactText('git clone https://user:hunter2pass@example.com/x.git') === `git clone https://${sessionlogRedact.REDACTED}@example.com/x.git`,
-  )
-  ok('sessionlog redact: a private key body is scrubbed', !sessionlogRedact.redactText('-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----').includes('AAAA'))
-  ok(
-    'sessionlog redact: ordinary prose and code are left alone',
-    sessionlogRedact.redactText('把 backend 的登录接口改成 JWT，const x = 1') === '把 backend 的登录接口改成 JWT，const x = 1',
-  )
-  // Over-redaction would quietly destroy the value of the upload.
-  ok(
-    'sessionlog redact: token COUNTS are not mistaken for tokens',
-    !sessionlogRedact.SECRET_KEY_PATTERN.test('max_tokens') &&
-      !sessionlogRedact.SECRET_KEY_PATTERN.test('maxTokens') &&
-      !sessionlogRedact.SECRET_KEY_PATTERN.test('tokenCount'),
-  )
-  ok(
-    'sessionlog redact: env-var style secret keys ARE recognised',
-    ['GITHUB_TOKEN', 'NPM_TOKEN', 'client_secret', 'apiKey', 'API_KEY', 'private_key', 'password', 'Authorization'].every((key) =>
-      sessionlogRedact.SECRET_KEY_PATTERN.test(key),
-    ),
-  )
-  const original = { seq: 9, type: 'tool/result', time: 1, data: { env: { GITHUB_TOKEN: githubToken }, output: `token=${npmToken}` } }
-  const frozen = JSON.stringify(original)
-  const redacted = sessionlogRedact.redactEvent(original)
-  ok('sessionlog redact: the canonical event is never mutated', JSON.stringify(original) === frozen)
-  ok('sessionlog redact: a secret-named key keeps its name and loses its value', redacted.data.env.GITHUB_TOKEN === sessionlogRedact.REDACTED)
-  ok('sessionlog redact: a credential inside a string value is scrubbed too', !JSON.stringify(redacted).includes('a1B2c3D4e5F6'))
-  ok(
-    'sessionlog redact: a pathological depth fails closed instead of overflowing',
-    (() => {
-      let deep = 'leaf'
-      for (let i = 0; i < 200; i++) deep = { nested: deep }
-      return JSON.stringify(sessionlogRedact.redactValue(deep)).includes(sessionlogRedact.REDACTED)
-    })(),
-  )
-  ok(
-    'sessionlog redact: credential shapes are detected for the settings page',
-    sessionlogRedact.detectCredentialShapes({ a: npmToken }).includes('npm-token') && sessionlogRedact.detectCredentialShapes({ a: 'hello' }).length === 0,
-  )
-  // Both outbound paths must go through it.
-  const wireSession = { id: 's', header: { version: 4, id: 's', createdAt: 1 }, inheritedEventCount: 0 }
-  const leakyEvent = { seq: 0, type: 'tool/result', time: 5, data: { message: { isError: false }, output: `_authToken=${npmToken}` } }
-  ok(
-    'sessionlog redact: the OTLP record path ships no credential',
-    !JSON.stringify(sessionlogWire.sessionLogRecord(wireSession, leakyEvent)).includes('a1B2c3D4e5F6'),
-  )
-  ok(
-    'sessionlog redact: the dsh_session_log request-field path ships no credential',
-    !JSON.stringify(sessionlogWire.wireEvent(leakyEvent)).includes('a1B2c3D4e5F6'),
-  )
-}
-
-// ---------------------------------------------------------------------------
 // 5. Browser half — script form, loader registration, module requests
 // ---------------------------------------------------------------------------
 const clientSource = read(pkg.exports['./client'].default)
@@ -1903,7 +1461,7 @@ const React = {
   },
   useEffect() {},
   // Identity, like React's: the memoized callback is only a stability hint, and
-  // the 会话日志 page's `send` is the first component here to use it.
+  // the settings pages' `send` callback is the first component here to use it.
   useCallback: (fn) => fn,
   useSyncExternalStore(_subscribe, getSnapshot) {
     return getSnapshot()
@@ -2038,36 +1596,26 @@ ok('lib/client.js: exports inject as an array', Array.isArray(clientExports?.inj
 ok('lib/client.js: injects the slots service', clientExports?.inject?.includes('slots'))
 ok('lib/client.js: injects nothing the shell does not provide', (clientExports?.inject ?? []).every((s) => s === 'slots'), JSON.stringify(clientExports?.inject))
 ok(
-  'lib/client.js: injects exactly three stylesheet tags (workspace+ panel, notice page, 会话日志 page)',
-  head.children.filter((tag) => tag.dataset.pluginCss !== undefined).length === 3 &&
+  'lib/client.js: injects exactly two stylesheet tags (workspace+ panel, notice page)',
+  head.children.filter((tag) => tag.dataset.pluginCss !== undefined).length === 2 &&
     head.children.every((tag) => tag.dataset.plugin === pkg.name),
   `tags=${head.children.length}`,
 )
 ok('lib/client.js: the workspace+ stylesheet is namespaced', head.children[0]?.textContent.includes('.dsh-workspace-plus-'))
 ok('lib/client.js: the workspace+ stylesheet styles the injected row button', head.children[0]?.textContent.includes('.dsh-workspace-plus-rowbtn'))
 ok('lib/client.js: the notice stylesheet is namespaced under dsh-notice- classes', head.children[1]?.textContent.includes('.dsh-notice-section'), head.children[1]?.textContent.slice(0, 40))
-// The sessionlog sheet MUST be appended last: the assertions above (and the row
-// button CSS read below) address the first two tags by index.
-ok(
-  'lib/client.js: the 会话日志 stylesheet is appended last and namespaced under dsh-sessionlog- classes',
-  head.children[2]?.textContent.includes('.dsh-sessionlog-section') &&
-    Boolean(head.children[2]?.dataset.pluginCss?.includes('sessionlog')),
-  head.children[2]?.textContent?.slice(0, 40),
-)
 {
   // A client-module reload re-runs the factory in the page that is already open:
   // each stylesheet must stay a single, CURRENT tag instead of a stale duplicate.
   head.children[0].textContent = 'stale'
   head.children[1].textContent = 'stale'
-  head.children[2].textContent = 'stale'
   registration.factory(requireStub)
   const tags = head.children.filter((tag) => tag.dataset.pluginCss !== undefined)
   ok(
-    'lib/client.js: a reload rewrites all three stylesheets instead of duplicating stale ones',
-    tags.length === 3 &&
+    'lib/client.js: a reload rewrites both stylesheets instead of duplicating stale ones',
+    tags.length === 2 &&
       String(tags[0].textContent).includes('.dsh-workspace-plus-dialog-card') &&
-      String(tags[1].textContent).includes('.dsh-notice-section') &&
-      String(tags[2].textContent).includes('.dsh-sessionlog-section'),
+      String(tags[1].textContent).includes('.dsh-notice-section'),
     `tags=${String(tags.length)}`,
   )
 }
@@ -2084,7 +1632,7 @@ ok(
 }
 
 registration.factory(requireStub)
-ok('lib/client.js: style injection is idempotent', head.children.length === 3, `tags=${head.children.length}`)
+ok('lib/client.js: style injection is idempotent', head.children.length === 2, `tags=${head.children.length}`)
 
 // ---------------------------------------------------------------------------
 // 6. The dialog's external store
@@ -2498,18 +2046,17 @@ try {
 }
 ok('client apply(): registers without throwing', clientApplyError === null, clientApplyError?.message)
 // The 通知 sub-feature adds a second `settings.section` registration (its own
-// page) and the 会话日志 sub-feature a third; the other slot waits stay
-// unchanged, and the order follows the registration order in apply().
+// page); the other slot waits stay unchanged, and the order follows the
+// registration order in apply().
 ok(
   'client apply(): every registration waits for its slot declaration',
   JSON.stringify(first.injections) ===
-    JSON.stringify(['settings.section', 'settings.section', 'settings.section', 'shell.overlay', 'main', 'sidebar.panellist']),
+    JSON.stringify(['settings.section', 'settings.section', 'shell.overlay', 'main', 'sidebar.panellist']),
   first.injections.join(', '),
 )
 // The effects are: workspace+ settings slot, notice poll, notice settings slot,
-// sessionlog settings slot, dialog overlay, fallback main panel, directory
-// picker, row buttons.
-ok('client apply(): uses ctx.effect for lifecycle ownership', first.effects.length === 8 && first.effects.every((effect) => typeof effect.label === 'string'), String(first.effects.length))
+// dialog overlay, fallback main panel, directory picker, row buttons.
+ok('client apply(): uses ctx.effect for lifecycle ownership', first.effects.length === 7 && first.effects.every((effect) => typeof effect.label === 'string'), String(first.effects.length))
 ok('client apply(): injects the shell directory picker optionally', JSON.stringify(first.serviceInjections) === JSON.stringify(['uiWorkspace', 'sessions', 'inputTriggers']), first.serviceInjections.join(', '))
 
 const names = (kind) => first.contributions.filter((c) => c.options.name === kind)
@@ -2529,10 +2076,9 @@ ok('client apply(): the overlay entry id is stable', overlay[0]?.options.id === 
 ok('client apply(): the overlay entry is the dialog', overlay[0]?.component === clientExports.WorkdirsDialog)
 
 const settingsSections = names('settings.section')
-ok('client apply(): registers exactly three settings pages (workspace+, 通知, 会话日志)', settingsSections.length === 3, String(settingsSections.length))
+ok('client apply(): registers exactly two settings pages (workspace+, 通知)', settingsSections.length === 2, String(settingsSections.length))
 const workspacePlusSection = settingsSections.find((c) => c.options.id === clientExports.SETTINGS_SECTION_ID)
 const noticeSection = settingsSections.find((c) => c.options.id === clientExports.NOTICE_SETTINGS_SECTION_ID)
-const sessionlogSection = settingsSections.find((c) => c.options.id === clientExports.SESSIONLOG_SETTINGS_SECTION_ID)
 ok('client apply(): the workspace+ settings page id is stable', workspacePlusSection !== undefined, settingsSections.map((c) => c.options.id).join(', '))
 ok('client apply(): the settings nav label is "workspace+"', workspacePlusSection?.options.label === 'workspace+', workspacePlusSection?.options.label)
 ok('client apply(): the settings page sits after the shipped sections', workspacePlusSection?.options.order > 20, String(workspacePlusSection?.options.order))
@@ -2540,31 +2086,6 @@ ok('client apply(): the settings page component is exported for tests', workspac
 // The 通知 page keeps the dsh-notice identity, so an upgrade reads as the same page.
 ok('client apply(): the notice settings page keeps the dsh-notice identity', noticeSection !== undefined && noticeSection.options.id === 'notice' && noticeSection.options.label === '通知' && noticeSection.options.order === 26, JSON.stringify(noticeSection?.options))
 ok('client apply(): the notice settings page component is exported for tests', noticeSection?.component === clientExports.NoticeSettings)
-// The 会话日志 page is this bundle's own sub-feature, so its identity is free to
-// be new — but it must sit after the notice page and keep a stable id.
-ok(
-  'client apply(): the 会话日志 settings page keeps a stable identity after the notice page',
-  sessionlogSection !== undefined &&
-    sessionlogSection.options.label === '会话日志' &&
-    sessionlogSection.options.order === 27 &&
-    sessionlogSection.options.order > (noticeSection?.options.order ?? 0),
-  JSON.stringify(sessionlogSection?.options),
-)
-ok(
-  'client apply(): the 会话日志 settings page component is exported for tests',
-  sessionlogSection?.component === clientExports.SessionlogSettings,
-)
-ok('client apply(): the sessionlog host route is declared once', clientExports.SESSIONLOG_API_PATH === '/dsh-sessionlog/api', clientExports.SESSIONLOG_API_PATH)
-// The page's request-field vocabulary must cover every state the host can report,
-// with a distinct sentence each — a missing case would silently read as "未启用".
-{
-  const lines = sessionlogHost.REQUEST_FIELD_STATES.map((state) => clientExports.sessionlogRequestFieldLine({ requestField: state }))
-  ok(
-    'client apply(): the 会话日志 page explains every request-field state the host reports',
-    lines.every((line) => typeof line === 'string' && line.includes('dsh_session_log')) && new Set(lines).size === lines.length,
-    lines.join(' | '),
-  )
-}
 
 // The row buttons worked in this environment, so the fallback entry must NOT be
 // registered: that is the "row button first, sidebar entry only as a fallback"
@@ -2705,68 +2226,6 @@ ok('settings page: surfaces a host failure instead of pretending', collectText(f
 const staleTree = render(settingsPage({ initial: { status: 'error', message: 'host responded 404', ok: null, busy: false } }))
 ok('settings page: diagnoses a 404 as a stale host process', collectText(staleTree).includes('重启'), collectText(staleTree).slice(0, 90))
 fetchReply = { status: 200, body: settingsSnapshot }
-
-// --- the 会话日志 settings page ----------------------------------------------
-// The page is a report of the host's channel state; the host is never consulted
-// for an optimistic value. `props.initial` is the test seam the shell never uses.
-const sessionlogPage = sessionlogSection.component
-const sessionlogSnapshot = {
-  ok: true,
-  settings: { enabled: false, endpoint: '', requestField: false, includeHistory: true, maxRequestBytes: 4000000, shutdownTimeoutMillis: 3000 },
-  defaults: { enabled: false, endpoint: '', requestField: false, includeHistory: true, maxRequestBytes: 4000000, shutdownTimeoutMillis: 3000 },
-  effectiveEndpoint: 'https://dsh-otel-collector.deepseeksvc.com/v1/logs',
-  endpointSource: 'default',
-  killSwitch: null,
-  blockedReason: '开关未开启',
-  channel: { otlpAvailable: true, reporting: false, requestField: 'taken', requestFieldError: 'dsh_session_log 已由其它插件提供' },
-  storePath: 'C:\\home\\sessionlog\\settings.json',
-  stats: { events: 0, sessions: 0, lastEventAt: null, lastAcceptAt: null, lastError: null, lastErrorAt: null },
-}
-
-{
-  const loadingText = collectText(render(sessionlogPage({})))
-  ok('会话日志 page: says it is reading the host settings while loading', loadingText.includes('正在读取设置'), loadingText.slice(0, 80))
-  const offText = collectText(render(sessionlogPage({ initial: { status: { kind: 'error', message: 'host responded 404' } } })))
-  ok(
-    '会话日志 page: renders a disabled host row as a state, not an error',
-    offText.includes('会话日志子功能当前未启用') && offText.includes('sessionlog'),
-    offText.slice(0, 90),
-  )
-  const failedText = collectText(render(sessionlogPage({ initial: { status: { kind: 'error', message: 'host responded 500' } } })))
-  ok('会话日志 page: surfaces a genuine transport failure', failedText.includes('读取设置失败'), failedText.slice(0, 80))
-
-  const readyTree = render(sessionlogPage({ initial: { snapshot: sessionlogSnapshot } }))
-  const readyText = collectText(readyTree)
-  ok('会话日志 page: names the feature the way the shipped switch does', readyText.includes('上传 Session Log') && readyText.includes('帮助改进 DeepSeek 模型与产品'))
-  ok('会话日志 page: states that the default is off and that it is provider-independent', readyText.includes('默认关闭') && readyText.includes('第三方模型 API'), readyText.slice(0, 160))
-  ok('会话日志 page: reports the effective endpoint and where it came from', readyText.includes('https://dsh-otel-collector.deepseeksvc.com/v1/logs') && readyText.includes('出厂默认'))
-  ok('会话日志 page: explains a request field that another plugin owns', readyText.includes('dsh_session_log') && readyText.includes('已由其它插件提供'), readyText.slice(0, 200))
-  ok('会话日志 page: reports the store path so the state file is findable', readyText.includes('sessionlog\\settings.json'), readyText.slice(-120))
-
-  const readySwitches = findElements(readyTree, (element) => element.type === 'button' && element.props.role === 'switch')
-  ok('会话日志 page: owns exactly three switches (master, request field, history)', readySwitches.length === 3, String(readySwitches.length))
-  ok('会话日志 page: the master switch reflects the host value', readySwitches[0]?.props['aria-checked'] === false)
-  ok('会话日志 page: the dependent switches are disabled while uploading is off', readySwitches[1]?.props.disabled === true && readySwitches[2]?.props.disabled === true)
-
-  fetchCalls.length = 0
-  fetchReply = {
-    status: 200,
-    body: { ...sessionlogSnapshot, ok: true, message: '设置已保存', settings: { ...sessionlogSnapshot.settings, enabled: true } },
-  }
-  const master = renderWithHooks(sessionlogPage, { initial: { snapshot: sessionlogSnapshot } })
-  const masterSwitch = findElements(master.tree, (element) => element.type === 'button' && element.props.role === 'switch')[0]
-  masterSwitch.props.onClick()
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  const posted = JSON.parse(String(fetchCalls[0]?.body ?? '{}'))
-  ok('会话日志 page: the master switch posts one patch key', fetchCalls.length === 1 && fetchCalls[0].method === 'POST' && posted.op === 'patch' && posted.patch.enabled === true, String(fetchCalls[0]?.body))
-  ok('会话日志 page: the request addresses this sub-feature own route', fetchCalls[0]?.url === '/dsh-sessionlog/api', String(fetchCalls[0]?.url))
-
-  const killedText = collectText(
-    render(sessionlogPage({ initial: { snapshot: { ...sessionlogSnapshot, settings: { ...sessionlogSnapshot.settings, enabled: true }, killSwitch: 'DSH_TELEMETRY_DISABLED 已设置，进程级关闭遥测' } } })),
-  )
-  ok('会话日志 page: a process-level opt-out is never reported as uploading', killedText.includes('DSH_TELEMETRY_DISABLED'), killedText.slice(0, 160))
-  fetchReply = { status: 200, body: settingsSnapshot }
-}
 
 // The dialog's test seam: the shell never passes `initial`.
 const readyState = {
