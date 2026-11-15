@@ -3,13 +3,10 @@
 [![npm version](https://img.shields.io/npm/v/dsh-workspace-plus.svg)](https://www.npmjs.com/package/dsh-workspace-plus)
 [![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/sen70s/dsh-workspace-plus)
 [![license](https://img.shields.io/npm/l/dsh-workspace-plus.svg)](https://github.com/Sen70s/dsh-workspace-plus/blob/main/LICENSE)
-**当前版本 `v0.7.1`** · 要求 DSH `>=0.1.7-rc.2`
+
+**当前版本 `v0.7.2`** · 要求 DSH `>=0.1.7-rc.2`
+
 DeepSeek Harness（DSH）的插件。一个插件，两个子功能，插件页里各占一行、可单独启停。
-
-DeepSeek Harness（DSH）的插件。一个插件，三个子功能，插件页里各占一行、可单独启停。
-
-| 子功能 | 说明 |
-| --- | --- |
 | **workspace+** | 一个工作区登记多个目录，每个目录一个标签。标签表注入每次请求，输入框打 `@` 也能直接引用 |
 | **通知 / notice** | 对话请求权限、询问用户、任务完成、中断、出错时弹 Windows 原生通知，点通知直接回到那个对话 |
 
