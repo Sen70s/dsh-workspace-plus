@@ -25,8 +25,18 @@
 #                  poll ride in the shared browser half, which serves them
 #                  regardless and degrades silently when this row is off.
 #
+#   sessionlog     会话日志上传 (exports "./sessionlog" ->
+#                  lib/sessionlog/index.js). Node half only, and OFF by
+#                  default. DSH's own "在使用官方模型 API 时上传 Session Log"
+#                  only ever fires while the official DeepSeek adapter performs
+#                  the request; this row reproduces it and adds a
+#                  provider-independent path, so a user on a third-party model
+#                  API can still hand the session log to DeepSeek. Its settings
+#                  page rides in the shared browser half on the same terms as
+#                  the notice page.
+#
 # Turning one row off removes exactly that half from the host while the bundle
-# and the other sub-feature keep working. The 通知 settings page also carries a
+# and the other sub-features keep working. The 通知 settings page also carries a
 # runtime "启用桌面通知" switch, so notifications can be silenced without
 # touching the row at all.
 - insert:
@@ -51,3 +61,25 @@
       #     done: true               # 任务完成
       #     aborted: true            # 任务中断
       #     error: true              # 任务出错
+    - id: sessionlog
+      name: 'dsh-workspace-plus/sessionlog'
+      # config:                      # deployment defaults for the session-log
+      #   enabled: false             # sub-feature. Ships OFF on purpose: this
+      #                              # hands conversation content to a remote
+      #                              # collector, so it must be an explicit act.
+      #                              # The 会话日志 settings page can still turn
+      #                              # it on per host.
+      #   endpoint: ''               # '' = $DSH_TELEMETRY_OTLP_URL, else the
+      #                              # DeepSeek collector the base profile uses
+      #   requestField: false        # also contribute the dsh_session_log request
+      #                              # field when nothing else owns it. OFF by
+      #                              # default: DSH performs no official-endpoint
+      #                              # check before attaching that field, so on a
+      #                              # host whose deepseek-official route points at
+      #                              # a relay it would send content to that relay.
+      #                              # Skipped anyway when the shipped
+      #                              # dsh-session-log-deepseek owns the field.
+      #   includeHistory: true       # when switched on mid-run, also send the
+      #                              # sessions that are already in the log
+      #   maxRequestBytes: 4000000   # per-request ceiling for one upload
+      #   shutdownTimeoutMillis: 3000 # drain deadline when the row unloads

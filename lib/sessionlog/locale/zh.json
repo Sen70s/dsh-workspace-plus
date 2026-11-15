@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "会话日志（上传）",
+    "description": "把会话日志上传给 DeepSeek（帮助改进 DeepSeek 模型与产品）。默认关闭；开启后与使用哪个模型 API 无关，换用第三方模型 API 时同样生效。"
+  }
+}

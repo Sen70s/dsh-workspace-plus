@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session Log (upload)",
+    "description": "Upload session logs to DeepSeek to help improve DeepSeek models and products. Off by default; once enabled it works regardless of which model API is in use."
+  }
+}
