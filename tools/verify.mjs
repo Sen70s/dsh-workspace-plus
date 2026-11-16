@@ -48,7 +48,7 @@ const KNOWN_SLOTS = {
   'sidebar.panellist': 'list',
   main: 'keyed',
   'shell.overlay': 'list',
-  'settings.section': 'list',
+  'plugins.row.config': 'keyed',
 }
 
 const results = []
@@ -154,6 +154,83 @@ ok('normalizeSettings(): keeps a boolean', host.normalizeSettings({ defaultWorks
 ok('normalizeState(): an older file without settings keeps working', host.normalizeState({ version: 1, workspaces: {} }).settings.defaultWorkspaceEnabled === false)
 ok('normalizeState(): reads a stored setting', host.normalizeState({ version: 1, settings: { defaultWorkspaceEnabled: true }, workspaces: {} }).settings.defaultWorkspaceEnabled === true)
 
+// --- the sidebar workspace-sort switch --------------------------------------
+ok('DEFAULT_SETTINGS: the sidebar workspace sort starts on', host.DEFAULT_SETTINGS.sortWorkspacesByRecent === true)
+ok('emptyState(): carries the workspace-sort switch', state.settings.sortWorkspacesByRecent === true)
+ok('defaultSettings(): hands out the sort switch too', host.defaultSettings().sortWorkspacesByRecent === true)
+ok('normalizeSettings(): keeps a stored sort switch', host.normalizeSettings({ sortWorkspacesByRecent: false }).sortWorkspacesByRecent === false)
+ok(
+  'normalizeSettings(): rejects a non-boolean sort switch',
+  host.normalizeSettings({ sortWorkspacesByRecent: 'no' }).sortWorkspacesByRecent === true,
+)
+ok(
+  'normalizeState(): an older file without the sort switch keeps it on',
+  host.normalizeState({ version: 1, workspaces: {} }).settings.sortWorkspacesByRecent === true,
+)
+{
+  const flipped = host.emptyState()
+  const appliedSort = host.applySettings(flipped, { sortWorkspacesByRecent: false })
+  ok(
+    'applySettings(): flips the sidebar workspace sort',
+    appliedSort.ok === true && flipped.settings.sortWorkspacesByRecent === false,
+    appliedSort.message,
+  )
+  ok(
+    'applySettings(): rejects a non-boolean sort switch and writes nothing',
+    host.applySettings(host.emptyState(), { sortWorkspacesByRecent: 1 }).ok === false,
+  )
+  ok(
+    'applySettings(): a sort flip leaves the per-workspace layer alone',
+    Object.keys(flipped.settings.workspaceEnabled).length === 0,
+  )
+}
+
+// --- the sidebar-sort cooldown ----------------------------------------------
+ok('DEFAULT_SETTINGS: the sort cooldown starts at five minutes', host.DEFAULT_SETTINGS.sortWorkspaceCooldownMinutes === 5)
+ok('emptyState(): carries the sort cooldown', state.settings.sortWorkspaceCooldownMinutes === 5)
+ok('defaultSettings(): hands out the cooldown', host.defaultSettings().sortWorkspaceCooldownMinutes === 5)
+ok('normalizeSettings(): keeps a stored cooldown', host.normalizeSettings({ sortWorkspaceCooldownMinutes: 30 }).sortWorkspaceCooldownMinutes === 30)
+ok('normalizeSettings(): accepts zero', host.normalizeSettings({ sortWorkspaceCooldownMinutes: 0 }).sortWorkspaceCooldownMinutes === 0)
+ok('normalizeSettings(): drops a negative cooldown', host.normalizeSettings({ sortWorkspaceCooldownMinutes: -5 }).sortWorkspaceCooldownMinutes === 5)
+ok('normalizeSettings(): drops a fractional cooldown', host.normalizeSettings({ sortWorkspaceCooldownMinutes: 1.5 }).sortWorkspaceCooldownMinutes === 5)
+ok('normalizeSettings(): drops an out-of-range cooldown', host.normalizeSettings({ sortWorkspaceCooldownMinutes: 5000 }).sortWorkspaceCooldownMinutes === 5)
+ok('normalizeSettings(): drops a string cooldown', host.normalizeSettings({ sortWorkspaceCooldownMinutes: '7' }).sortWorkspaceCooldownMinutes === 5)
+ok('normalizeState(): an older file keeps the default cooldown', host.normalizeState({ version: 1, workspaces: {} }).settings.sortWorkspaceCooldownMinutes === 5)
+{
+  const cooled = host.emptyState()
+  const appliedCooldown = host.applySettings(cooled, { sortWorkspaceCooldownMinutes: 12 })
+  ok('applySettings(): writes the sort cooldown', appliedCooldown.ok === true && cooled.settings.sortWorkspaceCooldownMinutes === 12, appliedCooldown.message)
+  ok('applySettings(): the message names the minutes', String(appliedCooldown.message).includes('12'))
+  ok('applySettings(): rejects a fractional cooldown', host.applySettings(host.emptyState(), { sortWorkspaceCooldownMinutes: 2.5 }).ok === false)
+  ok('applySettings(): rejects an out-of-range cooldown', host.applySettings(host.emptyState(), { sortWorkspaceCooldownMinutes: 1441 }).ok === false)
+  ok('applySettings(): rejects a string cooldown', host.applySettings(host.emptyState(), { sortWorkspaceCooldownMinutes: '9' }).ok === false)
+}
+
+// --- the folded-workspace active-session list --------------------------------
+ok('DEFAULT_SETTINGS: the folded-workspace list starts on', host.DEFAULT_SETTINGS.showActiveSessionsWhenCollapsed === true)
+ok('emptyState(): carries the folded-workspace switch', state.settings.showActiveSessionsWhenCollapsed === true)
+ok('defaultSettings(): hands out the folded-workspace switch', host.defaultSettings().showActiveSessionsWhenCollapsed === true)
+ok(
+  'normalizeSettings(): keeps a stored folded-workspace switch',
+  host.normalizeSettings({ showActiveSessionsWhenCollapsed: false }).showActiveSessionsWhenCollapsed === false,
+)
+ok(
+  'normalizeSettings(): rejects a non-boolean folded-workspace switch',
+  host.normalizeSettings({ showActiveSessionsWhenCollapsed: 'no' }).showActiveSessionsWhenCollapsed === true,
+)
+{
+  const folded = host.emptyState()
+  const appliedFolded = host.applySettings(folded, { showActiveSessionsWhenCollapsed: false })
+  ok(
+    'applySettings(): flips the folded-workspace switch',
+    appliedFolded.ok === true && folded.settings.showActiveSessionsWhenCollapsed === false,
+    appliedFolded.message,
+  )
+  ok(
+    'applySettings(): rejects a non-boolean folded-workspace switch',
+    host.applySettings(host.emptyState(), { showActiveSessionsWhenCollapsed: 1 }).ok === false,
+  )
+}
 // --- the per-workspace layer -------------------------------------------------
 ok('emptyState(): carries an empty per-workspace map', Object.keys(state.settings.workspaceEnabled).length === 0)
 ok(
@@ -517,6 +594,32 @@ ok('route(POST settings): the tool now accepts the default workspace', !String(a
 const settingsBack = fakeResponse()
 await captured.route.handler(fakeRequest('POST', { op: 'settings', settings: { defaultWorkspaceEnabled: false } }), settingsBack)
 ok('route(POST settings): can be turned back off', JSON.parse(settingsBack.body).settings?.defaultWorkspaceEnabled === false)
+ok('route(GET): publishes the workspace-sort switch', getPayload.settings?.sortWorkspacesByRecent === true)
+{
+  const sortOff = fakeResponse()
+  await captured.route.handler(fakeRequest('POST', { op: 'settings', settings: { sortWorkspacesByRecent: false } }), sortOff)
+  ok('route(POST settings): turns the workspace sort off', JSON.parse(sortOff.body).settings?.sortWorkspacesByRecent === false, JSON.parse(sortOff.body).message)
+  ok('route(POST settings): the sort switch reaches the state file', host.readState(stateFile).settings.sortWorkspacesByRecent === false)
+  const sortOn = fakeResponse()
+  await captured.route.handler(fakeRequest('POST', { op: 'settings', settings: { sortWorkspacesByRecent: true } }), sortOn)
+  ok('route(POST settings): turns the workspace sort back on', JSON.parse(sortOn.body).settings?.sortWorkspacesByRecent === true)
+  const sortBad = fakeResponse()
+  await captured.route.handler(fakeRequest('POST', { op: 'settings', settings: { sortWorkspacesByRecent: 'yes' } }), sortBad)
+  ok('route(POST settings): rejects a non-boolean sort switch', JSON.parse(sortBad.body).ok === false)
+}
+ok('route(GET): publishes the sort cooldown', getPayload.settings?.sortWorkspaceCooldownMinutes === 5)
+{
+  const cooled = fakeResponse()
+  await captured.route.handler(fakeRequest('POST', { op: 'settings', settings: { sortWorkspaceCooldownMinutes: 9 } }), cooled)
+  ok('route(POST settings): writes the sort cooldown', JSON.parse(cooled.body).settings?.sortWorkspaceCooldownMinutes === 9, JSON.parse(cooled.body).message)
+  ok('route(POST settings): the cooldown reaches the state file', host.readState(stateFile).settings.sortWorkspaceCooldownMinutes === 9)
+  const cooledBad = fakeResponse()
+  await captured.route.handler(fakeRequest('POST', { op: 'settings', settings: { sortWorkspaceCooldownMinutes: -1 } }), cooledBad)
+  ok('route(POST settings): rejects an out-of-range cooldown', JSON.parse(cooledBad.body).ok === false)
+  const cooledBack = fakeResponse()
+  await captured.route.handler(fakeRequest('POST', { op: 'settings', settings: { sortWorkspaceCooldownMinutes: 5 } }), cooledBack)
+  ok('route(POST settings): restores the cooldown', JSON.parse(cooledBack.body).settings?.sortWorkspaceCooldownMinutes === 5)
+}
 ok('route(POST settings): rejects a non-boolean', JSON.parse((await (async () => { const r = fakeResponse(); await captured.route.handler(fakeRequest('POST', { op: 'settings', settings: { defaultWorkspaceEnabled: 1 } }), r); return r })()).body).ok === false)
 
 // Turning an ordinarily-enabled workspace OFF through the route has to reach all
@@ -535,8 +638,8 @@ ok(
   String(contribution.text({ agent: { session: { header: { cwd: workspaceRoot } } } })) === '',
 )
 ok(
-  'route(POST settings): the tool refuses that workspace and names the settings page',
-  String(await tool.execute({ action: 'list', workspace: workspaceRoot }, {})).includes('设置 → workspace+'),
+  'route(POST settings): the tool refuses that workspace and names the row settings page',
+  String(await tool.execute({ action: 'list', workspace: workspaceRoot }, {})).includes('workspaceplus 行设置'),
 )
 ok(
   'route(POST settings): the override touches only its own workspace',
@@ -1233,7 +1336,14 @@ ok(
 
 // --- a minimal DOM double that understands exactly the selectors this bundle uses
 const styleTags = []
+/**
+ * Animation frames are id-addressable like the real ones, so `cancelAnimationFrame`
+ * can actually withdraw a queued callback (the archive dialog's long press
+ * cancels its fill on release).
+ */
 const rafQueue = []
+const rafCancelled = new Set()
+let rafNextId = 1
 const observers = []
 
 function makeDom() {
@@ -1320,6 +1430,24 @@ function makeElement(tag) {
     addEventListener(type, fn) {
       element.listeners[type] = fn
     },
+    /** Real-DOM membership test, used by the delete interception. */
+    contains(node) {
+      let current = node
+      while (current !== null && current !== undefined) {
+        if (current === element) return true
+        current = current.parent
+      }
+      return false
+    },
+    /**
+     * Programmatic click, mirroring `HTMLElement.click()`: the page's capture
+     * listeners run first (so a replay pass is consumed there), then the test's
+     * own shell handler runs.
+     */
+    click() {
+      const event = dispatchDocumentClick(element)
+      if (!event.propagationStopped && typeof element.clickHandler === 'function') element.clickHandler(event)
+    },
     get isConnected() {
       let node = element
       while (node.parent !== null) node = node.parent
@@ -1332,28 +1460,50 @@ function makeElement(tag) {
   return element
 }
 function descendants(element) {
+  // Document order, like querySelectorAll: the footer's buttons are read as
+  // [cancel, confirm] by the delete interception, so a reversed walk would make
+  // the interceptor capture the wrong button.
   const out = []
-  const stack = [...element.children]
-  while (stack.length > 0) {
-    const node = stack.pop()
-    out.push(node)
-    stack.push(...node.children)
+  const walk = (node) => {
+    for (const child of node.children) {
+      out.push(child)
+      walk(child)
+    }
   }
+  walk(element)
   return out
 }
 function matches(element, selector) {
   if (selector === '[data-slot="sidebar.workspaces"]') return element.getAttribute('data-slot') === 'sidebar.workspaces'
   if (selector === '[data-row-key^="workspace:"]') return (element.getAttribute('data-row-key') ?? '').startsWith('workspace:')
+  if (selector === '[role="dialog"][aria-modal="true"]') {
+    return element.getAttribute('role') === 'dialog' && element.getAttribute('aria-modal') === 'true'
+  }
+  if (selector === 'button') return element.tagName === 'BUTTON'
+  if (selector === 'p') return element.tagName === 'P'
   if (selector.startsWith('style[data-plugin-css=')) return element.dataset.pluginCss !== undefined
   return false
 }
 
 const { body, head } = makeDom()
+/**
+ * `document`-level listeners, split by phase so a test dispatch can prove the
+ * delete interception stops an event before the shell's own handler ({@link
+ * dispatchDocumentClick}). The plugin only ever registers capture listeners.
+ */
+const documentListeners = []
 const fakeDocument = {
   baseURI: 'http://127.0.0.1:19387/',
   body,
   head,
   createElement: (tag) => makeElement(tag),
+  addEventListener(type, fn, capture) {
+    documentListeners.push({ type, fn, capture: capture === true })
+  },
+  removeEventListener(type, fn, capture) {
+    const at = documentListeners.findIndex((entry) => entry.type === type && entry.fn === fn && entry.capture === (capture === true))
+    if (at !== -1) documentListeners.splice(at, 1)
+  },
   querySelector: (selector) => {
     if (selector.startsWith('style[data-plugin-css=')) {
       const wanted = selector.match(/data-plugin-css="(.*)"\]$/)?.[1]
@@ -1361,6 +1511,27 @@ const fakeDocument = {
     }
     return descendants(body).find((node) => matches(node, selector)) ?? null
   },
+  querySelectorAll: (selector) => descendants(body).filter((node) => matches(node, selector)),
+}
+
+/** Dispatch a click the way the page does: capture listeners, then bubble ones. */
+function dispatchDocumentClick(target) {
+  const event = {
+    target,
+    prevented: 0,
+    propagationStopped: false,
+    preventDefault() {
+      event.prevented += 1
+    },
+    stopPropagation() {
+      event.propagationStopped = true
+    },
+  }
+  for (const entry of documentListeners.filter((listener) => listener.type === 'click' && listener.capture)) entry.fn(event)
+  if (!event.propagationStopped) {
+    for (const entry of documentListeners.filter((listener) => listener.type === 'click' && !listener.capture)) entry.fn(event)
+  }
+  return event
 }
 
 class FakeMutationObserver {
@@ -1377,8 +1548,14 @@ class FakeMutationObserver {
 const flushMutations = () => {
   for (const observer of [...observers]) if (!observer.disconnected) observer.callback([], observer)
 }
-const flushAnimationFrames = () => {
-  for (const callback of rafQueue.splice(0)) callback(0)
+const flushAnimationFrames = (at = 0) => {
+  for (const entry of rafQueue.splice(0)) {
+    if (rafCancelled.has(entry.id)) {
+      rafCancelled.delete(entry.id)
+      continue
+    }
+    entry.callback(at)
+  }
 }
 /** One full reconcile cycle: a DOM mutation, then the animation frame it schedules. */
 const settleDom = () => {
@@ -1404,8 +1581,14 @@ const sandbox = {
   window: { __ModuleLoader__: { load: (registration) => registrations.push(registration) } },
   document: fakeDocument,
   MutationObserver: FakeMutationObserver,
-  requestAnimationFrame: (callback) => rafQueue.push(callback),
-  cancelAnimationFrame: () => {},
+  requestAnimationFrame: (callback) => {
+    const id = rafNextId++
+    rafQueue.push({ id, callback })
+    return id
+  },
+  cancelAnimationFrame: (id) => {
+    rafCancelled.add(id)
+  },
   setTimeout,
   clearTimeout,
   fetch: async (url, init) => {
@@ -1463,6 +1646,18 @@ const React = {
   // Identity, like React's: the memoized callback is only a stability hint, and
   // the settings pages' `send` callback is the first component here to use it.
   useCallback: (fn) => fn,
+  // The archive-on-delete dialog keeps its hold animation in a ref; the cell
+  // store keeps that object stable across the renders of one session, exactly
+  // like React keeps one ref object per hook position.
+  useRef(initial) {
+    const session = hookCells
+    if (session !== null) {
+      const at = session.index++
+      if (!(at in session.values)) session.values[at] = { current: initial }
+      return session.values[at]
+    }
+    return { current: initial }
+  },
   useSyncExternalStore(_subscribe, getSnapshot) {
     return getSnapshot()
   },
@@ -1629,6 +1824,13 @@ ok('lib/client.js: the notice stylesheet is namespaced under dsh-notice- classes
   ok('row button CSS: no resting background', base.includes('background:0 0') && !base.includes('interactive-bg-hover'))
   ok('row button CSS: uses the shell tertiary label color', base.includes('color:var(--dsw-alias-label-tertiary)'))
   ok('row button CSS: hover changes only the color', hover.includes('color:') && !hover.includes('background'), hover)
+{
+  // The folded-workspace row is the native 32px session row at the group's indent.
+  const css = String(head.children[0]?.textContent ?? '')
+  const activeRow = css.match(/\.dsh-workspace-plus-active-row\{([^}]*)\}/)?.[1] ?? ''
+  ok('folded CSS: draws a 32px native-height row', activeRow.includes('height:32px') && activeRow.includes('padding-inline-start'), activeRow.slice(0, 80))
+  ok('folded CSS: running/pending/done dots use state tokens', css.includes('.dsh-workspace-plus-active-dot.is-running') && css.includes('.dsh-workspace-plus-active-dot.is-pending') && css.includes('.dsh-workspace-plus-active-dot.is-done'))
+}
 }
 
 registration.factory(requireStub)
@@ -1992,6 +2194,37 @@ function makeTriggerRegistry() {
 }
 
 /** A client context that records what the plugin registers. */
+// Doubles for the two optional services the delete interception reads: the
+// Host Workspace projection (session accounting + archive set) and the shell
+// dictionary (the localized delete-dialog title and default Workspace name).
+const archiveFixture = {
+  items: [],
+  archivedSessionIds: [],
+  calls: [],
+  archiveHandler: null,
+}
+const archiveWorkspacesDouble = {
+  list: {
+    getSnapshot: () => ({ items: archiveFixture.items, archivedSessionIds: archiveFixture.archivedSessionIds }),
+  },
+  async delete(workspaceId) {
+    archiveFixture.calls.push({ kind: 'delete', workspaceId })
+  },
+  async archiveSession(sessionId, options) {
+    archiveFixture.calls.push({ kind: 'archive', sessionId, stopActivity: options?.stopActivity === true })
+    if (typeof archiveFixture.archiveHandler === 'function') return archiveFixture.archiveHandler(sessionId, options)
+    archiveFixture.archivedSessionIds = [...archiveFixture.archivedSessionIds, sessionId]
+  },
+}
+const archiveLocaleDouble = {
+  bind: (ns) => (key) => {
+    if (ns === 'workspace' && key === 'delete.workspace') return '删除工作区'
+    if (ns === 'workspace' && key === 'workspace.defaultName') return '默认工作区'
+    if (ns === 'workspace' && key === 'cancel') return '取消'
+    return key
+  },
+}
+
 function makeClientCtx({ withUiWorkspace = true, withServices = true } = {}) {
   const effects = []
   const injections = []
@@ -2016,6 +2249,8 @@ function makeClientCtx({ withUiWorkspace = true, withServices = true } = {}) {
         if (deps.includes('uiWorkspace') && withUiWorkspace) scope.uiWorkspace = uiWorkspaceDouble
         if (deps.includes('sessions')) scope.sessions = sessionsDouble
         if (deps.includes('inputTriggers')) scope.inputTriggers = triggers
+        if (deps.includes('workspaces')) scope.workspaces = archiveWorkspacesDouble
+        if (deps.includes('locale')) scope.locale = archiveLocaleDouble
         const dispose = callback(scope)
         return typeof dispose === 'function' ? dispose : () => {}
       },
@@ -2045,47 +2280,69 @@ try {
   clientApplyError = error
 }
 ok('client apply(): registers without throwing', clientApplyError === null, clientApplyError?.message)
-// The 通知 sub-feature adds a second `settings.section` registration (its own
-// page); the other slot waits stay unchanged, and the order follows the
-// registration order in apply().
+// Both settings pages occupy `plugins.row.config`, one entry per loader row
+// (workspaceplus, notice); the other slot waits stay unchanged, and the order
+// follows the registration order in apply().
 ok(
   'client apply(): every registration waits for its slot declaration',
   JSON.stringify(first.injections) ===
-    JSON.stringify(['settings.section', 'settings.section', 'shell.overlay', 'main', 'sidebar.panellist']),
+    JSON.stringify(['plugins.row.config', 'plugins.row.config', 'shell.overlay', 'main', 'sidebar.panellist', 'shell.overlay']),
   first.injections.join(', '),
 )
 // The effects are: workspace+ settings slot, notice poll, notice settings slot,
-// dialog overlay, fallback main panel, directory picker, row buttons.
-ok('client apply(): uses ctx.effect for lifecycle ownership', first.effects.length === 7 && first.effects.every((effect) => typeof effect.label === 'string'), String(first.effects.length))
-ok('client apply(): injects the shell directory picker optionally', JSON.stringify(first.serviceInjections) === JSON.stringify(['uiWorkspace', 'sessions', 'inputTriggers']), first.serviceInjections.join(', '))
+// dialog overlay, fallback main panel, directory picker, row buttons, and the
+// four archive-on-delete seats (workspace projection, dictionary, interceptor,
+// its dialog).
+ok('client apply(): uses ctx.effect for lifecycle ownership', first.effects.length === 13 && first.effects.every((effect) => typeof effect.label === 'string'), String(first.effects.length))
+ok('client apply(): injects the shell directory picker optionally', JSON.stringify(first.serviceInjections) === JSON.stringify(['uiWorkspace', 'sessions', 'inputTriggers', 'sessions,workspaces', 'sessions,workspaces', 'workspaces', 'locale']), first.serviceInjections.join(', '))
 
 const names = (kind) => first.contributions.filter((c) => c.options.name === kind)
 ok('client apply(): contributes into known slots only', first.contributions.every((c) => KNOWN_SLOTS[c.options.name] !== undefined), first.contributions.map((c) => c.options.name).join(', '))
 ok('client apply(): the sidebar slot is a known list slot', KNOWN_SLOTS['sidebar.panellist'] === 'list')
 ok('client apply(): the main slot is a known keyed slot', KNOWN_SLOTS.main === 'keyed')
 ok('client apply(): the overlay slot is a known list slot', KNOWN_SLOTS['shell.overlay'] === 'list')
-ok('client apply(): the settings slot is a known list slot', KNOWN_SLOTS['settings.section'] === 'list')
+ok('client apply(): the row-config slot is a known keyed slot', KNOWN_SLOTS['plugins.row.config'] === 'keyed')
 
 const mainKeys = names('main').map((c) => c.options.key).sort()
 ok('client apply(): only the fallback main key is registered', JSON.stringify(mainKeys) === JSON.stringify(['workdirs']), mainKeys.join(', '))
 ok('client apply(): every main panel is a component', names('main').every((c) => typeof c.component === 'function'))
 
 const overlay = names('shell.overlay')
-ok('client apply(): registers exactly one overlay entry', overlay.length === 1, String(overlay.length))
-ok('client apply(): the overlay entry id is stable', overlay[0]?.options.id === 'workdirs-dialog', overlay[0]?.options.id)
-ok('client apply(): the overlay entry is the dialog', overlay[0]?.component === clientExports.WorkdirsDialog)
+ok('client apply(): registers exactly two overlay entries (directory dialog, archive question)', overlay.length === 2, String(overlay.length))
+ok('client apply(): the directory overlay entry id is stable', overlay[0]?.options.id === 'workdirs-dialog', overlay[0]?.options.id)
+ok('client apply(): the directory overlay entry is the dialog', overlay[0]?.component === clientExports.WorkdirsDialog)
+ok('client apply(): the archive question is its own overlay entry', overlay[1]?.options.id === clientExports.ARCHIVE_DELETE_OVERLAY_ID, overlay[1]?.options.id)
+ok('client apply(): the archive question is the exported component', overlay[1]?.component === clientExports.ArchiveDeleteDialog)
 
-const settingsSections = names('settings.section')
-ok('client apply(): registers exactly two settings pages (workspace+, 通知)', settingsSections.length === 2, String(settingsSections.length))
-const workspacePlusSection = settingsSections.find((c) => c.options.id === clientExports.SETTINGS_SECTION_ID)
-const noticeSection = settingsSections.find((c) => c.options.id === clientExports.NOTICE_SETTINGS_SECTION_ID)
-ok('client apply(): the workspace+ settings page id is stable', workspacePlusSection !== undefined, settingsSections.map((c) => c.options.id).join(', '))
-ok('client apply(): the settings nav label is "workspace+"', workspacePlusSection?.options.label === 'workspace+', workspacePlusSection?.options.label)
-ok('client apply(): the settings page sits after the shipped sections', workspacePlusSection?.options.order > 20, String(workspacePlusSection?.options.order))
-ok('client apply(): the settings page component is exported for tests', workspacePlusSection?.component === clientExports.WorkspacePlusSettings)
-// The 通知 page keeps the dsh-notice identity, so an upgrade reads as the same page.
-ok('client apply(): the notice settings page keeps the dsh-notice identity', noticeSection !== undefined && noticeSection.options.id === 'notice' && noticeSection.options.label === '通知' && noticeSection.options.order === 26, JSON.stringify(noticeSection?.options))
-ok('client apply(): the notice settings page component is exported for tests', noticeSection?.component === clientExports.NoticeSettings)
+const rowConfigs = names('plugins.row.config')
+ok('client apply(): registers exactly two row configuration pages (workspace+, 通知)', rowConfigs.length === 2, String(rowConfigs.length))
+const workspaceRowConfig = rowConfigs.find((c) => c.options.key === clientExports.WORKSPACE_ROW_CONFIG_KEY)
+const noticeRowConfig = rowConfigs.find((c) => c.options.key === clientExports.NOTICE_ROW_CONFIG_KEY)
+ok('client apply(): the workspace+ page is keyed by <package>#workspaceplus', workspaceRowConfig !== undefined, rowConfigs.map((c) => c.options.key).join(', '))
+ok('client apply(): the notice page is keyed by <package>#notice', noticeRowConfig !== undefined, rowConfigs.map((c) => c.options.key).join(', '))
+ok(
+  'client apply(): the row keys are the package name plus the patch row ids',
+  clientExports.WORKSPACE_ROW_CONFIG_KEY === 'dsh-workspace-plus#workspaceplus' && clientExports.NOTICE_ROW_CONFIG_KEY === 'dsh-workspace-plus#notice',
+  clientExports.WORKSPACE_ROW_CONFIG_KEY + ', ' + clientExports.NOTICE_ROW_CONFIG_KEY,
+)
+// The whole point of the move: nothing of this bundle shows up in Settings.
+ok('client apply(): nothing is registered into the product Settings page any more', names('settings.section').length === 0, names('settings.section').map((c) => c.options.id).join(', '))
+ok('client apply(): the workspace+ page component is exported for tests', workspaceRowConfig?.component === clientExports.WorkspaceRowConfig)
+ok('client apply(): the notice page component is exported for tests', noticeRowConfig?.component === clientExports.NoticeRowConfig)
+// The page owner asks for `summary` when the row has no description of its own;
+// `page` must be the settings page itself, not a wrapper of a wrapper.
+ok(
+  'row config: the summary view is the row one-liner',
+  workspaceRowConfig?.component({ view: 'summary' }) === clientExports.WORKSPACE_ROW_SUMMARY &&
+    noticeRowConfig?.component({ view: 'summary' }) === clientExports.NOTICE_ROW_SUMMARY,
+  String(workspaceRowConfig?.component({ view: 'summary' })),
+)
+ok(
+  'row config: the page view renders the settings page',
+  workspaceRowConfig?.component({ view: 'page' })?.type === clientExports.WorkspacePlusSettings &&
+    noticeRowConfig?.component({ view: 'page' })?.type === clientExports.NoticeSettings,
+  String(workspaceRowConfig?.component({ view: 'page' })?.type),
+)
 
 // The row buttons worked in this environment, so the fallback entry must NOT be
 // registered: that is the "row button first, sidebar entry only as a fallback"
@@ -2094,6 +2351,94 @@ const sidebarIds = names('sidebar.panellist').map((c) => c.options.id)
 ok('client apply(): the test-era helloworld entry is gone', !sidebarIds.includes('helloworld'), sidebarIds.join(', '))
 ok('client apply(): the fallback sidebar entry stays out while row buttons work', !sidebarIds.includes('workdirs'), sidebarIds.join(', '))
 ok('client apply(): the host API path is declared once', clientExports.API_PATH === 'workspaceplus/api', clientExports.API_PATH)
+ok('folded list: the switch key is exported', clientExports.SHOW_ACTIVE_SETTING === 'showActiveSessionsWhenCollapsed', clientExports.SHOW_ACTIVE_SETTING)
+ok('folded list: the installer is exported for tests', typeof clientExports.installCollapsedActiveSessions === 'function')
+ok('folded list: the status selector is exported for tests', typeof clientExports.activeSessionsFor === 'function')
+{
+  // The folded list's selector: only working conversations, never a blank,
+  // archived or subagent row, and only descendants whose own row is hidden.
+  const statuses = new Map([
+    ['run', { running: true }],
+    ['ask', { pendingInteraction: { kind: 'approval' } }],
+    ['done', { completionUnread: true }],
+    ['idle', { running: false }],
+  ])
+  const sessions = {
+    byId: {
+      run: { id: 'run', title: 'Running', updatedAt: 3000, running: true },
+      ask: { id: 'ask', title: 'Ask', updatedAt: 2000 },
+      done: { id: 'done', title: 'Done', updatedAt: 1000 },
+      idle: { id: 'idle', title: 'Idle', updatedAt: 900 },
+      blank: { id: 'blank', title: '', blank: true, updatedAt: 800 },
+      arch: { id: 'arch', title: 'Archived', updatedAt: 700, running: true },
+      sub: { id: 'sub', title: 'Subagent', updatedAt: 600, origin: 'subagent', running: true },
+    },
+  }
+  const workspaces = [
+    { workspaceId: 'ws-1', path: 'D:\\proj', title: 'proj', sessionIds: ['run', 'done', 'idle', 'blank', 'arch', 'sub'] },
+    { workspaceId: 'ws-child', path: 'D:\\proj\\app', title: 'app', sessionIds: ['ask'] },
+  ]
+  const select = (hidden, archived = ['arch']) =>
+    clientExports.activeSessionsFor({
+      workspaceId: 'ws-1',
+      workspaceIds: hidden,
+      workspaces,
+      sessions,
+      statuses,
+      archivedSessionIds: new Set(archived),
+    })
+  const both = select(['ws-child'])
+  ok(
+    'folded list: running, waiting and unread completions are selected',
+    both.map((row) => row.id).join(',') === 'run,ask,done',
+    both.map((row) => row.id).join(','),
+  )
+  ok(
+    'folded list: a blank, archived or subagent row is never selected',
+    !both.some((row) => ['blank', 'arch', 'sub', 'idle'].includes(row.id)),
+  )
+  ok(
+    'folded list: rows are newest activity first',
+    both[0]?.updatedAt >= both[1]?.updatedAt && both[1]?.updatedAt >= both[2]?.updatedAt,
+  )
+  ok(
+    'folded list: a descendant with its own row is not duplicated',
+    select([]).map((row) => row.id).join(',') === 'run,done',
+    select([]).map((row) => row.id).join(','),
+  )
+  ok(
+    'folded list: a descendant folded into the group names its workspace',
+    both.find((row) => row.id === 'ask')?.ownerTitle === 'app',
+  )
+  ok(
+    'folded list: a missing status falls back to the list running flag',
+    clientExports.activeSessionsFor({
+      workspaceId: 'ws-1',
+      workspaceIds: [],
+      workspaces,
+      sessions,
+      statuses: null,
+      archivedSessionIds: new Set(['arch']),
+    }).map((row) => row.id).join(',') === 'run',
+  )
+  ok(
+    'folded list: a running subagent keeps its parent visible',
+    clientExports
+      .activeSessionsFor({
+        workspaceId: 'ws-1',
+        workspaceIds: [],
+        workspaces: [{ workspaceId: 'ws-1', path: 'D:\\proj', title: 'proj', sessionIds: ['parent'] }],
+        sessions: {
+          byId: { parent: { id: 'parent', title: 'Parent', updatedAt: 5 }, kid: { id: 'kid', running: true, updatedAt: 6 } },
+          projectionsBySession: { parent: { values: { subagentCatalog: [{ id: 'kid' }] } } },
+        },
+        statuses: null,
+        archivedSessionIds: new Set(),
+      })
+      .map((row) => row.id)
+      .join(',') === 'parent',
+  )
+}
 
 // The shell's panel button calls layout.selectPanel(id) unconditionally, so a
 // registered sidebar entry without a matching main key would throw on click.
@@ -2126,7 +2471,8 @@ clientExports.closeWorkdirsDialog()
 // ---------------------------------------------------------------------------
 const hintPanel = names('main')[0].component
 const dialog = overlay[0].component
-const settingsPage = workspacePlusSection.component
+// The row page is the wrapper; these tests drive the settings page underneath it.
+const settingsPage = clientExports.WorkspacePlusSettings
 
 const hintTree = render(hintPanel({}))
 const hintText = collectText(hintTree)
@@ -2148,7 +2494,7 @@ const workspaceKey = host.keyOf(workspaceRoot)
 const settingsSnapshot = {
   ok: true,
   registryAvailable: true,
-  settings: { defaultWorkspaceEnabled: false, workspaceEnabled: {} },
+  settings: { defaultWorkspaceEnabled: false, workspaceEnabled: {}, sortWorkspacesByRecent: true, sortWorkspaceCooldownMinutes: 5 },
   defaultWorkspaceId: 'ws-default',
   defaultWorkspacePath: defaultDir,
   workspaces: [
@@ -2161,15 +2507,25 @@ const settingsTree = render(settingsPage({}))
 const settingsText = collectText(settingsTree)
 const switches = () => findElements(render(settingsPage({})), (element) => element.props.role === 'switch')
 ok('settings page: explains what one switch covers', settingsText.includes('按工作区启用'), settingsText.slice(0, 80))
-ok('settings page: renders one switch per workspace', switches().length === 2, String(switches().length))
+ok('settings page: renders the two global switches plus one switch per workspace', switches().length === 4, String(switches().length))
+ok('settings page: the sidebar sort switch starts on', switches()[0]?.props['aria-checked'] === true, String(switches()[0]?.props['aria-checked']))
+ok('settings page: the sidebar sort switch is labelled', switches()[0]?.props['aria-label'] === '侧栏工作区按最近对话排序', String(switches()[0]?.props['aria-label']))
+ok('settings page: explains the sidebar sort', settingsText.includes('侧栏工作区按最近对话排序'))
+ok('settings page: names the sort cooldown', settingsText.includes('同一对话的排序冷却'))
+const cooldownInputs = () => findElements(render(settingsPage({})), (element) => element.type === 'input' && element.props.type === 'number')
+ok('settings page: renders one cooldown field', cooldownInputs().length === 1, String(cooldownInputs().length))
+ok('settings page: the cooldown field shows the host value', cooldownInputs()[0]?.props.value === '5', String(cooldownInputs()[0]?.props.value))
+ok('settings page: the cooldown field is labelled', cooldownInputs()[0]?.props['aria-label'] === '排序冷却（分钟）', String(cooldownInputs()[0]?.props['aria-label']))
 ok('settings page: lists every workspace path', settingsText.includes(defaultDir) && settingsText.includes(workspaceRoot))
 ok('settings page: marks the default workspace', settingsText.includes('默认工作区'))
-ok('settings page: the default workspace switch starts off', switches()[0]?.props['aria-checked'] === false, String(switches()[0]?.props['aria-checked']))
-ok('settings page: every other workspace switch starts on', switches()[1]?.props['aria-checked'] === true, String(switches()[1]?.props['aria-checked']))
+ok('settings page: the folded-workspace switch starts on', switches()[1]?.props['aria-checked'] === true, String(switches()[1]?.props['aria-checked']))
+ok('settings page: the folded-workspace switch is labelled', switches()[1]?.props['aria-label'] === '折叠工作区仍显示正在工作的会话', String(switches()[1]?.props['aria-label']))
+ok('settings page: the default workspace switch starts off', switches()[2]?.props['aria-checked'] === false, String(switches()[2]?.props['aria-checked']))
+ok('settings page: every other workspace switch starts on', switches()[3]?.props['aria-checked'] === true, String(switches()[3]?.props['aria-checked']))
 ok(
   'settings page: switches are labelled per workspace for assistive tech',
-  switches()[0]?.props['aria-label'] === '默认工作区 启用 workspace+',
-  String(switches()[0]?.props['aria-label']),
+  switches()[2]?.props['aria-label'] === '默认工作区 启用 workspace+',
+  String(switches()[2]?.props['aria-label']),
 )
 ok('settings page: says the switch does not delete labels', settingsText.includes('关掉不会删除已登记的标签'), settingsText.slice(0, 120))
 
@@ -2188,7 +2544,7 @@ fetchReply = {
     ],
   },
 }
-switches()[1].props.onClick()
+switches()[3].props.onClick()
 await new Promise((resolve) => setTimeout(resolve, 0))
 ok(
   'settings page: flipping a switch posts a settings op',
@@ -2206,7 +2562,96 @@ ok(
   ok('settings page: the request never guesses a key from the path', !String(fetchCalls[0]?.body).includes('"undefined"'), String(fetchCalls[0]?.body))
 }
 ok('settings page: the shared snapshot picks up the override', clientExports.readHostState().settings.workspaceEnabled[workspaceKey] === false)
-ok('settings page: the switch re-renders as off', switches()[1]?.props['aria-checked'] === false, String(switches()[1]?.props['aria-checked']))
+ok('settings page: the switch re-renders as off', switches()[3]?.props['aria-checked'] === false, String(switches()[3]?.props['aria-checked']))
+
+// The global sort switch writes the same settings op, keyed by its own setting.
+fetchCalls.length = 0
+fetchReply = {
+  status: 200,
+  body: {
+    ...settingsSnapshot,
+    message: '已关闭侧栏工作区按最近对话排序',
+    settings: { ...settingsSnapshot.settings, sortWorkspacesByRecent: false },
+  },
+}
+switches()[0].props.onClick()
+await new Promise((resolve) => setTimeout(resolve, 0))
+ok(
+  'settings page: flipping the sort switch posts the sort setting',
+  JSON.parse(String(fetchCalls[0]?.body))?.settings?.sortWorkspacesByRecent === false,
+  String(fetchCalls[0]?.body),
+)
+ok(
+  'settings page: the sort switch re-renders as off',
+  switches()[0]?.props['aria-checked'] === false,
+  String(switches()[0]?.props['aria-checked']),
+)
+// The cooldown field is the one control with a commit point: typing does not
+// write, 保存 does, and an out-of-range value never leaves the page.
+{
+  const typedSession = renderWithHooks(settingsPage, {})
+  const field = findElements(typedSession.tree, (element) => element.type === 'input' && element.props.type === 'number')[0]
+  field?.props.onChange({ target: { value: '12' } })
+  const drafted = renderWithHooks(settingsPage, {}, typedSession.cells)
+  const draftedField = findElements(drafted.tree, (element) => element.type === 'input' && element.props.type === 'number')[0]
+  ok('settings page: typing updates the cooldown draft', draftedField?.props.value === '12', String(draftedField?.props.value))
+  fetchCalls.length = 0
+  fetchReply = {
+    status: 200,
+    body: {
+      ...settingsSnapshot,
+      message: '工作区排序冷却已设为 12 分钟（AI 回复结束后这段时间内继续发消息不会重排）',
+      settings: { ...settingsSnapshot.settings, sortWorkspaceCooldownMinutes: 12 },
+    },
+  }
+  const save = findElements(drafted.tree, (element) => element.type === 'button' && collectText(element).includes('保存'))[0]
+  ok('settings page: the cooldown row offers a save control', save !== undefined)
+  save?.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  ok(
+    'settings page: saving the cooldown posts the minute count',
+    JSON.parse(String(fetchCalls[0]?.body))?.settings?.sortWorkspaceCooldownMinutes === 12,
+    String(fetchCalls[0]?.body),
+  )
+  ok('settings page: the shared snapshot holds the new cooldown', clientExports.readHostState().settings.sortWorkspaceCooldownMinutes === 12)
+  const refusedSession = renderWithHooks(settingsPage, {})
+  findElements(refusedSession.tree, (element) => element.type === 'input' && element.props.type === 'number')[0]?.props.onChange({ target: { value: 'abc' } })
+  const refused = renderWithHooks(settingsPage, {}, refusedSession.cells)
+  fetchCalls.length = 0
+  findElements(refused.tree, (element) => element.type === 'button' && collectText(element).includes('保存'))[0]?.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  ok('settings page: an unusable cooldown never reaches the host', fetchCalls.length === 0, JSON.stringify(fetchCalls))
+}
+clientExports.publishHostPayload(settingsSnapshot)
+fetchReply = { status: 200, body: settingsSnapshot }
+
+// The folded-workspace list is the second global switch: it writes its own
+// setting through the same op and reads back from the shared snapshot.
+fetchCalls.length = 0
+fetchReply = {
+  status: 200,
+  body: {
+    ...settingsSnapshot,
+    message: '已关闭「折叠工作区仍显示正在工作的会话」',
+    settings: { ...settingsSnapshot.settings, showActiveSessionsWhenCollapsed: false },
+  },
+}
+switches()[1].props.onClick()
+await new Promise((resolve) => setTimeout(resolve, 0))
+ok(
+  'settings page: flipping the folded-workspace switch posts its setting',
+  JSON.parse(String(fetchCalls[0]?.body))?.settings?.showActiveSessionsWhenCollapsed === false,
+  String(fetchCalls[0]?.body),
+)
+ok(
+  'settings page: the folded-workspace switch re-renders as off',
+  switches()[1]?.props['aria-checked'] === false,
+  String(switches()[1]?.props['aria-checked']),
+)
+clientExports.publishHostPayload(settingsSnapshot)
+fetchReply = { status: 200, body: settingsSnapshot }
+clientExports.publishHostPayload(settingsSnapshot)
+fetchReply = { status: 200, body: settingsSnapshot }
 
 // A host that predates the per-workspace layer answers without keys: the page
 // must say so instead of posting a switch nobody can address.
@@ -2216,7 +2661,7 @@ clientExports.publishHostPayload({
 })
 const keylessText = collectText(render(settingsPage({})))
 ok('settings page: reports a host that publishes no workspace keys', keylessText.includes('没有 key'), keylessText.slice(0, 80))
-ok('settings page: disables the switches it cannot address', switches().every((element) => element.props.disabled === true))
+ok('settings page: disables the per-workspace switches it cannot address', switches().slice(2).every((element) => element.props.disabled === true))
 clientExports.publishHostPayload(settingsSnapshot)
 fetchReply = { status: 200, body: settingsSnapshot }
 
@@ -2227,7 +2672,348 @@ const staleTree = render(settingsPage({ initial: { status: 'error', message: 'ho
 ok('settings page: diagnoses a 404 as a stale host process', collectText(staleTree).includes('重启'), collectText(staleTree).slice(0, 90))
 fetchReply = { status: 200, body: settingsSnapshot }
 
+// --- the sidebar workspace-order installer -----------------------------------
+{
+  const ws = (workspaceId, sessionIds) => ({ workspaceId, sessionIds })
+  const ranked = (workspaces, sessions, archived = []) => clientExports.orderWorkspacesByRecency(workspaces, sessions, archived)
+
+  ok(
+    'workspace order: the newest conversation ranks its folder first',
+    JSON.stringify(ranked([ws('a', ['sa']), ws('b', ['sb']), ws('c', ['sc'])], { byId: { sa: { updatedAt: 100 }, sb: { updatedAt: 300 }, sc: { updatedAt: 200 } } })) ===
+      JSON.stringify(['b', 'c', 'a']),
+  )
+  ok(
+    'workspace order: folders without a session keep their tail order',
+    JSON.stringify(ranked([ws('a', []), ws('b', ['sb']), ws('c', [])], { byId: { sb: { updatedAt: 5 } } })) === JSON.stringify(['b', 'a', 'c']),
+  )
+  ok(
+    'workspace order: an archived session does not rank its folder',
+    JSON.stringify(ranked([ws('a', ['sa']), ws('b', ['sb'])], { byId: { sa: { updatedAt: 900 }, sb: { updatedAt: 100 } } }, ['sa'])) === JSON.stringify(['b', 'a']),
+  )
+  ok(
+    'workspace order: a tie keeps the order the host already had',
+    JSON.stringify(ranked([ws('a', ['sa']), ws('b', ['sb'])], { byId: { sa: { updatedAt: 7 }, sb: { updatedAt: 7 } } })) === JSON.stringify(['a', 'b']),
+  )
+  ok(
+    'workspace order: every id appears exactly once',
+    JSON.stringify(ranked([ws('a', []), ws('b', []), ws('c', [])], { byId: {} }).sort()) === JSON.stringify(['a', 'b', 'c']),
+  )
+  ok(
+    'workspace moves: one move reaches the target order',
+    JSON.stringify(clientExports.workspaceMoves(['a', 'b', 'c'], ['c', 'a', 'b'])) === JSON.stringify([{ workspaceId: 'c', beforeWorkspaceId: 'a' }]),
+  )
+  ok(
+    'workspace moves: a reversal is planned in run order',
+    JSON.stringify(clientExports.workspaceMoves(['a', 'b', 'c'], ['c', 'b', 'a'])) ===
+      JSON.stringify([
+        { workspaceId: 'c', beforeWorkspaceId: 'a' },
+        { workspaceId: 'b', beforeWorkspaceId: 'a' },
+      ]),
+  )
+  ok('workspace moves: an order already in place needs no move', clientExports.workspaceMoves(['a', 'b'], ['a', 'b']).length === 0)
+
+  // An installer double that behaves like the real projections: `insertBefore`
+  // applies the move and notifies, exactly as the Host echo does.
+  const state = {
+    items: [ws('a', ['sa']), ws('b', ['sb']), ws('c', [])],
+    archivedSessionIds: [],
+    phase: 'ready',
+    moves: [],
+    listeners: new Set(),
+  }
+  const sessionState = { byId: { sa: { updatedAt: 100 }, sb: { updatedAt: 300 } }, phase: 'ready' }
+  const sessionListeners = new Set()
+  const notifyAll = () => {
+    for (const listener of [...state.listeners]) listener()
+  }
+  const workspacesService = {
+    list: {
+      getSnapshot: () => ({ items: [...state.items], archivedSessionIds: [...state.archivedSessionIds], phase: state.phase }),
+      subscribe: (listener) => {
+        state.listeners.add(listener)
+        return () => state.listeners.delete(listener)
+      },
+    },
+    async insertBefore(workspaceId, beforeWorkspaceId) {
+      state.moves.push([workspaceId, beforeWorkspaceId])
+      const moved = state.items.find((item) => item.workspaceId === workspaceId)
+      const rest = state.items.filter((item) => item.workspaceId !== workspaceId)
+      const at = rest.findIndex((item) => item.workspaceId === beforeWorkspaceId)
+      rest.splice(at === -1 ? rest.length : at, 0, moved)
+      state.items = rest
+      notifyAll()
+      return { ok: true }
+    },
+  }
+  const sessionsService = {
+    list: {
+      getSnapshot: () => sessionState,
+      subscribe: (listener) => {
+        sessionListeners.add(listener)
+        return () => sessionListeners.delete(listener)
+      },
+    },
+  }
+  const touchSessions = () => {
+    for (const listener of [...sessionListeners]) listener()
+  }
+  const order = () => state.items.map((item) => item.workspaceId).join(',')
+
+  // The switch starts off and the first ready pass only records its baseline:
+  // opening DSH must leave the Host's own order alone.
+  clientExports.publishHostPayload({ ...settingsSnapshot, settings: { ...settingsSnapshot.settings, sortWorkspacesByRecent: false } })
+  const ordering = clientExports.installWorkspaceOrdering({ workspaces: workspacesService, sessions: sessionsService, debounceMs: 5 })
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  ok(
+    'workspace sort: the first pass leaves the Host order alone',
+    order() === 'a,b,c' && state.moves.length === 0,
+    order() + ' / ' + JSON.stringify(state.moves),
+  )
+  clientExports.publishHostPayload({ ...settingsSnapshot, settings: { ...settingsSnapshot.settings, sortWorkspacesByRecent: true } })
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  ok('workspace sort: turning the switch on aligns the list once', order() === 'b,a,c', order())
+  ok(
+    'workspace sort: it commits through the shell insertBefore',
+    state.moves.length === 1 && state.moves[0][0] === 'b' && state.moves[0][1] === 'a',
+    JSON.stringify(state.moves),
+  )
+
+  const beforeSession = state.moves.length
+  sessionState.byId = { sa: { updatedAt: 900 }, sb: { updatedAt: 300 } }
+  touchSessions()
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  ok('workspace sort: a new conversation moves its folder back to the top', order() === 'a,b,c', order())
+  ok('workspace sort: that took one more move', state.moves.length === beforeSession + 1, JSON.stringify(state.moves))
+
+  state.archivedSessionIds = ['sa']
+  sessionState.byId = { sa: { updatedAt: 900 }, sb: { updatedAt: 400 } }
+  notifyAll()
+  touchSessions()
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  ok('workspace sort: an archived conversation stops ranking its folder', order() === 'b,a,c', order())
+
+  clientExports.publishHostPayload({ ...settingsSnapshot, settings: { ...settingsSnapshot.settings, sortWorkspacesByRecent: false } })
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  const beforeOff = state.moves.length
+  sessionState.byId = { sa: { updatedAt: 1 }, sb: { updatedAt: 5000 } }
+  touchSessions()
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  ok('workspace sort: the switch stops every further reorder', state.moves.length === beforeOff, JSON.stringify(state.moves.slice(beforeOff)))
+
+  ordering.dispose()
+  const beforeDispose = state.moves.length
+  sessionState.byId = { sa: { updatedAt: 8000 }, sb: { updatedAt: 1 } }
+  touchSessions()
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  ok('workspace sort: dispose unsubscribes and stops reordering', state.moves.length === beforeDispose, JSON.stringify(state.moves.slice(beforeDispose)))
+
+  clientExports.publishHostPayload(settingsSnapshot)
+}
+
 // The dialog's test seam: the shell never passes `initial`.
+
+// --- the sort rules: real work only, and not twice for one piece of work -------
+{
+  const ws = (workspaceId, sessionIds) => ({ workspaceId, path: '/x/' + workspaceId, sessionIds })
+  const state = { items: [ws('a', ['sa']), ws('b', ['sb'])], archivedSessionIds: [], phase: 'ready', moves: [], listeners: new Set() }
+  const sessionState = {
+    phase: 'ready',
+    byId: {
+      sa: { updatedAt: 100, running: false, blank: false, cwd: '/x/a' },
+      sb: { updatedAt: 200, running: false, blank: false, cwd: '/x/b' },
+    },
+  }
+  const sessionListeners = new Set()
+  const notifyWorkspaces = () => {
+    for (const listener of [...state.listeners]) listener()
+  }
+  const setSessions = (byId) => {
+    sessionState.byId = byId
+    for (const listener of [...sessionListeners]) listener()
+  }
+  let clock = 1000000
+  const service = {
+    list: {
+      getSnapshot: () => ({ items: [...state.items], archivedSessionIds: [...state.archivedSessionIds], phase: state.phase }),
+      subscribe: (listener) => {
+        state.listeners.add(listener)
+        return () => state.listeners.delete(listener)
+      },
+    },
+    async insertBefore(workspaceId, beforeWorkspaceId) {
+      state.moves.push([workspaceId, beforeWorkspaceId])
+      const moved = state.items.find((item) => item.workspaceId === workspaceId)
+      const rest = state.items.filter((item) => item.workspaceId !== workspaceId)
+      const at = rest.findIndex((item) => item.workspaceId === beforeWorkspaceId)
+      rest.splice(at === -1 ? rest.length : at, 0, moved)
+      state.items = rest
+      notifyWorkspaces()
+      return { ok: true }
+    },
+  }
+  const sessionsService = {
+    list: {
+      getSnapshot: () => sessionState,
+      subscribe: (listener) => {
+        sessionListeners.add(listener)
+        return () => sessionListeners.delete(listener)
+      },
+    },
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30))
+  const order = () => state.items.map((item) => item.workspaceId).join(',')
+
+  clientExports.publishHostPayload({
+    ...settingsSnapshot,
+    settings: { ...settingsSnapshot.settings, sortWorkspacesByRecent: true, sortWorkspaceCooldownMinutes: 5 },
+  })
+  const ordering = clientExports.installWorkspaceOrdering({ workspaces: service, sessions: sessionsService, debounceMs: 5, now: () => clock })
+  await settle()
+  ok('sort rules: opening DSH leaves the list exactly as the Host had it', order() === 'a,b' && state.moves.length === 0, order() + ' / ' + JSON.stringify(state.moves))
+
+  // Clicking "new conversation" only adds a blank placeholder.
+  const beforeBlank = state.moves.length
+  state.items = [ws('a', ['sa', 'blank-a']), ws('b', ['sb'])]
+  sessionState.byId = { ...sessionState.byId, 'blank-a': { updatedAt: 110, running: false, blank: true, cwd: '/x/a' } }
+  notifyWorkspaces()
+  setSessions(sessionState.byId)
+  await settle()
+  ok('sort rules: a blank new conversation moves nothing', state.moves.length === beforeBlank, JSON.stringify(state.moves.slice(beforeBlank)))
+
+  // Sending the first message starts a turn: that is the trigger.
+  setSessions({
+    sa: { updatedAt: 100, running: false, blank: false, cwd: '/x/a' },
+    sb: { updatedAt: 300, running: true, blank: false, cwd: '/x/b' },
+    'blank-a': { updatedAt: 110, running: false, blank: true, cwd: '/x/a' },
+  })
+  await settle()
+  ok('sort rules: a started turn lifts its folder', order() === 'b,a', order())
+
+  // The reply ends; a follow-up one minute later is still the same work.
+  setSessions({
+    sa: { updatedAt: 100, running: false, blank: false, cwd: '/x/a' },
+    sb: { updatedAt: 300, running: false, blank: false, cwd: '/x/b' },
+  })
+  await settle()
+  const beforeCooldown = state.moves.length
+  clock += 60000
+  setSessions({
+    sa: { updatedAt: 100, running: false, blank: false, cwd: '/x/a' },
+    sb: { updatedAt: 310, running: true, blank: false, cwd: '/x/b' },
+  })
+  await settle()
+  ok('sort rules: a follow-up inside the cooldown does not reorder', state.moves.length === beforeCooldown, JSON.stringify(state.moves.slice(beforeCooldown)))
+
+  // Another folder's work is visible, so the next reorder has an effect.
+  setSessions({
+    sa: { updatedAt: 400, running: true, blank: false, cwd: '/x/a' },
+    sb: { updatedAt: 310, running: false, blank: false, cwd: '/x/b' },
+  })
+  await settle()
+  ok('sort rules: a folder taking work takes the top', order() === 'a,b', order())
+
+  // Past the window, the first send of the older conversation is new work.
+  clock += 360000
+  setSessions({
+    sa: { updatedAt: 400, running: false, blank: false, cwd: '/x/a' },
+    sb: { updatedAt: 500, running: true, blank: false, cwd: '/x/b' },
+  })
+  await settle()
+  ok('sort rules: the first send after the cooldown reorders again', order() === 'b,a', order())
+
+  ordering.dispose()
+  clientExports.publishHostPayload(settingsSnapshot)
+}
+
+// --- the folder-busy rule -------------------------------------------------------
+{
+  const ws = (workspaceId, sessionIds) => ({ workspaceId, path: '/y/' + workspaceId, sessionIds })
+  const state = { items: [ws('a', ['sa']), ws('b', ['sb', 'new-b'])], archivedSessionIds: [], phase: 'ready', moves: [], listeners: new Set() }
+  const sessionState = {
+    phase: 'ready',
+    byId: {
+      sa: { updatedAt: 100, running: false, blank: false, cwd: '/y/a' },
+      sb: { updatedAt: 200, running: true, blank: false, cwd: '/y/b' },
+      'new-b': { updatedAt: 150, running: false, blank: false, cwd: '/y/b' },
+    },
+  }
+  const sessionListeners = new Set()
+  const service = {
+    list: {
+      getSnapshot: () => ({ items: [...state.items], archivedSessionIds: [...state.archivedSessionIds], phase: state.phase }),
+      subscribe: (listener) => {
+        state.listeners.add(listener)
+        return () => state.listeners.delete(listener)
+      },
+    },
+    async insertBefore(workspaceId, beforeWorkspaceId) {
+      state.moves.push([workspaceId, beforeWorkspaceId])
+      const moved = state.items.find((item) => item.workspaceId === workspaceId)
+      const rest = state.items.filter((item) => item.workspaceId !== workspaceId)
+      const at = rest.findIndex((item) => item.workspaceId === beforeWorkspaceId)
+      rest.splice(at === -1 ? rest.length : at, 0, moved)
+      state.items = rest
+      return { ok: true }
+    },
+  }
+  const sessionsService = {
+    list: {
+      getSnapshot: () => sessionState,
+      subscribe: (listener) => {
+        sessionListeners.add(listener)
+        return () => sessionListeners.delete(listener)
+      },
+    },
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30))
+  const order = () => state.items.map((item) => item.workspaceId).join(',')
+
+  clientExports.publishHostPayload({
+    ...settingsSnapshot,
+    settings: { ...settingsSnapshot.settings, sortWorkspacesByRecent: true, sortWorkspaceCooldownMinutes: 5 },
+  })
+  const ordering = clientExports.installWorkspaceOrdering({ workspaces: service, sessions: sessionsService, debounceMs: 5 })
+  await settle()
+  ok('sort rules: the first pass leaves the running conversation where it was', order() === 'a,b' && state.moves.length === 0, order() + ' / ' + JSON.stringify(state.moves))
+
+  const beforeBusy = state.moves.length
+  sessionState.byId = { ...sessionState.byId, 'new-b': { updatedAt: 900, running: true, blank: false, cwd: '/y/b' } }
+  for (const listener of [...sessionListeners]) listener()
+  await settle()
+  ok('sort rules: another running conversation in that folder blocks the reorder', state.moves.length === beforeBusy, JSON.stringify(state.moves.slice(beforeBusy)))
+  ok('sort rules: the order stays where the Host had it', order() === 'a,b', order())
+
+  // Once that folder is free, the next send there moves it.
+  sessionState.byId = {
+    sa: { updatedAt: 100, running: false, blank: false, cwd: '/y/a' },
+    sb: { updatedAt: 200, running: false, blank: false, cwd: '/y/b' },
+    'new-b': { updatedAt: 4000, running: true, blank: false, cwd: '/y/b' },
+  }
+  for (const listener of [...sessionListeners]) listener()
+  await settle()
+  ok('sort rules: once the folder is free the next start moves it', order() === 'b,a', order())
+
+  ordering.dispose()
+  clientExports.publishHostPayload(settingsSnapshot)
+}
+
+ok(
+  'sort rules: a reply end arms the cooldown window',
+  JSON.stringify(clientExports.sessionTransitions({ s1: { running: true, updatedAt: 5, blank: false } }, { s1: { running: false, updatedAt: 5, blank: false } })) ===
+    JSON.stringify({ started: [], ended: ['s1'] }),
+)
+ok(
+  'sort rules: the first message of a blank placeholder counts as a start',
+  clientExports.sessionTransitions({ s1: { running: false, updatedAt: 5, blank: true } }, { s1: { running: false, updatedAt: 9, blank: false } }).started.includes('s1'),
+)
+ok(
+  'sort rules: the trigger session never counts as the other running one',
+  clientExports.folderHasRunningSession({ sessionIds: ['s1'] }, { s1: { running: true } }, 's1') === false,
+)
+ok(
+  'sort rules: the cwd fallback finds the owning workspace',
+  clientExports.workspaceOfSession([{ workspaceId: 'w', path: 'C:/tmp/proj', sessionIds: [] }], 's9', { cwd: 'c:/tmp/PROJ/' })?.workspaceId === 'w',
+)
 const readyState = {
   status: 'ready',
   message: '',
@@ -2567,7 +3353,7 @@ const offDialogState = {
 const offTree = render(dialog({ initial: offDialogState }))
 const offDialogText = collectText(offTree)
 ok('dialog: names a switched-off workspace', offDialogText.includes('已在 workspace+ 里停用'), offDialogText.slice(0, 120))
-ok('dialog: points at the settings page that owns the switch', offDialogText.includes('设置 → workspace+'))
+ok('dialog: points at the row settings page that owns the switch', offDialogText.includes('workspaceplus 行设置'))
 {
   const notice = findByClass(offTree, 'dsh-workspace-plus-notice')
   ok('dialog: the switched-off state is a warning notice', hasClass(notice, 'dsh-workspace-plus-notice-warn'), String(notice?.props?.className))
@@ -2938,8 +3724,291 @@ ok('parseLabelValue(): rejects a partial payload', clientExports.parseLabelValue
 ok('parseLabelValue(): reads a complete payload', clientExports.parseLabelValue('{"label":"a","path":"P"}')?.path === 'P')
 
 // ---------------------------------------------------------------------------
-// 11. Optional: cross-check dsh.client.inject against the composed profile
+// 10.5 The delete-workspace interception — archive the Sessions before deleting
 // ---------------------------------------------------------------------------
+// The shell's confirmation is the only gesture that commits a Workspace delete,
+// so this feature stops that one click, asks whether to archive the Workspace's
+// conversations, and then replays the click so the shell still owns the delete.
+// The tests drive the exact DOM shape the shell's Modal renders: a
+// `[role=dialog][aria-modal=true]` whose aria-label repeats the confirming
+// footer button's label and whose description quotes the Workspace title.
+ok('archive-on-delete: the overlay id is stable', clientExports.ARCHIVE_DELETE_OVERLAY_ID === 'archive-on-delete', clientExports.ARCHIVE_DELETE_OVERLAY_ID)
+ok('archive-on-delete: the long press is 1.2 s', clientExports.ARCHIVE_DELETE_HOLD_MS === 1200, String(clientExports.ARCHIVE_DELETE_HOLD_MS))
+ok('archive-on-delete: the dialog selector is the shell Modal shape', clientExports.DIALOG_SELECTOR === '[role="dialog"][aria-modal="true"]', clientExports.DIALOG_SELECTOR)
+{
+  const css = String(head.children[0]?.textContent ?? '')
+  ok('archive-on-delete CSS: the hold button and its fill are styled', css.includes('.dsh-workspace-plus-hold{') && css.includes('.dsh-workspace-plus-hold-fill{'), 'hold rules missing')
+  ok('archive-on-delete CSS: the hold is gated behind the error token, not a brand color', css.includes('.dsh-workspace-plus-hold{') && css.includes('--dsw-alias-state-error-primary'))
+}
+
+/** One fake shell delete-confirmation dialog, appended to the page body. */
+const makeShellDeleteDialog = ({ title = '删除工作区', confirmLabel = title, description = '', extraFooter = null } = {}) => {
+  const dialog = fakeDocument.createElement('div')
+  dialog.setAttribute('role', 'dialog')
+  dialog.setAttribute('aria-modal', 'true')
+  dialog.setAttribute('aria-label', title)
+  dialog.textContent = description
+  const content = fakeDocument.createElement('div')
+  const paragraph = fakeDocument.createElement('p')
+  paragraph.textContent = description
+  content.appendChild(paragraph)
+  dialog.appendChild(content)
+  const footer = fakeDocument.createElement('div')
+  const extra = extraFooter === null ? null : fakeDocument.createElement('button')
+  if (extra !== null) {
+    extra.textContent = extraFooter
+    footer.appendChild(extra)
+  }
+  const cancel = fakeDocument.createElement('button')
+  cancel.textContent = '取消'
+  const confirm = fakeDocument.createElement('button')
+  confirm.textContent = confirmLabel
+  footer.appendChild(cancel)
+  footer.appendChild(confirm)
+  dialog.appendChild(footer)
+  body.appendChild(dialog)
+  const handle = { dialog, cancel, confirm, extra, replayed: 0, cancelled: 0, extraClicks: 0, close: () => dialog.remove() }
+  confirm.clickHandler = () => {
+    handle.replayed += 1
+  }
+  cancel.clickHandler = () => {
+    handle.cancelled += 1
+  }
+  if (extra !== null) {
+    extra.clickHandler = () => {
+      handle.extraClicks += 1
+    }
+  }
+  return handle
+}
+
+/** Reset the Workspace projection the interceptor reads. */
+const resetArchiveFixture = () => {
+  archiveFixture.items = [{ workspaceId: 'ws-1', title: 'demo', path: workspaceRoot, sessionIds: ['s-1', 's-2', 's-3'] }]
+  archiveFixture.archivedSessionIds = ['s-3']
+  archiveFixture.calls = []
+  archiveFixture.archiveHandler = null
+}
+resetArchiveFixture()
+clientExports.cancelArchiveDelete()
+
+ok('archive-on-delete: no question is open before any delete', clientExports.readArchiveDeleteRequest() === null)
+
+// Title quoting: every shipped delete.desc wraps the Workspace name in quotes,
+// and the quote alphabet differs per language.
+ok('archive-on-delete: recognizes “quoted” titles', clientExports.quotedIncludes('将把“demo”从工作区列表中移除。', 'demo'))
+ok('archive-on-delete: recognizes 「quoted」 titles', clientExports.quotedIncludes('「demo」をワークスペース一覧から削除します。', 'demo'))
+ok('archive-on-delete: recognizes « quoted » titles', clientExports.quotedIncludes('Cela supprime « demo » de la liste.', 'demo'))
+ok('archive-on-delete: a bare mention is not a quote', clientExports.quotedIncludes('删除 demo 工作区', 'demo') === false)
+ok('archive-on-delete: the automatic default Workspace reads localized', clientExports.archiveWorkspaceTitle({ title: 'default-workspace' }) === '默认工作区')
+ok('archive-on-delete: an ordinary title reads verbatim', clientExports.archiveWorkspaceTitle({ title: 'demo' }) === 'demo')
+ok(
+  'archive-on-delete: a quoted match beats an unquoted one',
+  clientExports.matchWorkspaceByTitle('将把“demo”移除，另一个 demo 不受影响', [{ title: 'demo' }])?.title === 'demo',
+)
+
+// A dialog the feature can prove is the Workspace-delete confirmation: matched.
+{
+  const handle = makeShellDeleteDialog({ description: '将把“demo”从工作区列表中移除。文件夹与会话记录会保留，其会话将显示在“未分组”下。' })
+  const found = clientExports.findWorkspaceDeleteDialog(fakeDocument)
+  ok('archive-on-delete: finds the shell delete confirmation', found !== null && found.workspace.workspaceId === 'ws-1', JSON.stringify(found?.workspace?.workspaceId))
+  ok('archive-on-delete: the confirming button is the footer\'s last one', found?.confirm === handle.confirm)
+  handle.close()
+}
+
+// Every near-miss is left alone: the interceptor never guesses.
+{
+  const rename = makeShellDeleteDialog({ title: '重命名工作区', confirmLabel: '重命名', description: '把“demo”重命名' })
+  ok('archive-on-delete: a dialog whose button does not repeat its title is ignored', clientExports.findWorkspaceDeleteDialog(fakeDocument) === null)
+  rename.close()
+  const unknownWorkspace = makeShellDeleteDialog({ description: '将把“other”从工作区列表中移除。' })
+  ok('archive-on-delete: a dialog naming no known Workspace is ignored', clientExports.findWorkspaceDeleteDialog(fakeDocument) === null)
+  unknownWorkspace.close()
+  const otherLanguage = makeShellDeleteDialog({ title: 'Delete workspace', confirmLabel: 'Delete workspace', description: 'This removes “demo” from the workspace list.' })
+  ok('archive-on-delete: the shell dictionary names the one expected title', clientExports.findWorkspaceDeleteDialog(fakeDocument) === null)
+  otherLanguage.close()
+}
+
+// The interception itself: the click is stopped before the shell's own handler
+// and opens the question with exactly the unarchived Sessions.
+{
+  const handle = makeShellDeleteDialog({ description: '将把“demo”从工作区列表中移除。文件夹与会话记录会保留，其会话将显示在“未分组”下。' })
+  const shellEvents = []
+  const shellHandler = () => shellEvents.push('committed')
+  documentListeners.push({ type: 'click', fn: shellHandler, capture: false })
+  const events = []
+  const unsubscribe = clientExports.subscribeArchiveDeleteRequest(() => events.push(clientExports.readArchiveDeleteRequest()))
+  const event = dispatchDocumentClick(handle.confirm)
+  unsubscribe()
+  documentListeners.splice(documentListeners.findIndex((entry) => entry.fn === shellHandler), 1)
+  const request = clientExports.readArchiveDeleteRequest()
+  ok('archive-on-delete: the confirm click is preventDefault-ed', event.prevented === 1 && event.propagationStopped === true, `${String(event.prevented)}/${String(event.propagationStopped)}`)
+  ok('archive-on-delete: the shell\'s own handler never sees that click', shellEvents.length === 0, shellEvents.join(','))
+  ok('archive-on-delete: one request is published', events.length === 1 && request !== null, String(events.length))
+  ok(
+    'archive-on-delete: the question lists the unarchived Sessions only',
+    JSON.stringify(request?.sessionIds) === JSON.stringify(['s-1', 's-2']) && request?.total === 2 && request?.displayTitle === 'demo',
+    JSON.stringify(request),
+  )
+  ok('archive-on-delete: the request starts idle', request?.phase === 'idle' && request?.done === 0 && request?.error === '')
+
+  // "仅删除工作区" replays the very click, so the shell commits the delete as usual.
+  clientExports.skipArchiveAndDelete()
+  ok('archive-on-delete: skipping archives nothing', archiveFixture.calls.length === 0, JSON.stringify(archiveFixture.calls))
+  ok('archive-on-delete: skipping replays the shell click', clientExports.readArchiveDeleteRequest() === null && handle.replayed === 1, String(handle.replayed))
+  ok('archive-on-delete: skipping leaves the shell cancel alone', handle.cancelled === 0, String(handle.cancelled))
+  handle.close()
+}
+
+// Cancelling replays the button the shell LABELS as cancel, not merely the
+// first footer button, so an extra footer action cannot shift the way out.
+{
+  resetArchiveFixture()
+  const handle = makeShellDeleteDialog({ description: '将把“demo”从工作区列表中移除。', extraFooter: '更多操作' })
+  dispatchDocumentClick(handle.confirm)
+  ok('archive-on-delete: a dialog with an extra footer action is still recognized', clientExports.readArchiveDeleteRequest() !== null)
+  clientExports.cancelArchiveDelete()
+  ok('archive-on-delete: cancel replays the labelled cancel, not the first button', handle.cancelled === 1 && handle.extraClicks === 0, `${String(handle.cancelled)}/${String(handle.extraClicks)}`)
+  handle.close()
+}
+
+// Zero unarchived Sessions: nothing to ask, the shell's plain delete proceeds.
+{
+  archiveFixture.items = [{ workspaceId: 'ws-1', title: 'demo', sessionIds: ['s-3'] }]
+  archiveFixture.archivedSessionIds = ['s-3']
+  archiveFixture.calls = []
+  const handle = makeShellDeleteDialog({ description: '将把“demo”从工作区列表中移除。' })
+  const shellEvents = []
+  const shellHandler = () => shellEvents.push('committed')
+  documentListeners.push({ type: 'click', fn: shellHandler, capture: false })
+  const event = dispatchDocumentClick(handle.confirm)
+  documentListeners.splice(documentListeners.findIndex((entry) => entry.fn === shellHandler), 1)
+  ok('archive-on-delete: an all-archived Workspace is not intercepted', event.prevented === 0 && shellEvents.length === 1, `${String(event.prevented)}/${shellEvents.length}`)
+  ok('archive-on-delete: no question opens for it', clientExports.readArchiveDeleteRequest() === null)
+  handle.close()
+  resetArchiveFixture()
+}
+
+// The archive run: every Session is archived, then the intercepted click is
+// replayed. Running work is retried with `stopActivity` — the long press is the
+// confirmation for that, and the dialog says so before it is pressed.
+{
+  resetArchiveFixture()
+  archiveFixture.archiveHandler = (sessionId, options) => {
+    if (sessionId === 's-1' && options?.stopActivity !== true) {
+      const error = new Error('session is active')
+      error.rpcError = { code: 'workspace/session-active', message: 'session is active' }
+      throw error
+    }
+    return undefined
+  }
+  const handle = makeShellDeleteDialog({ description: '将把“demo”从工作区列表中移除。' })
+  dispatchDocumentClick(handle.confirm)
+  ok('archive-on-delete: the question opened before archiving', clientExports.readArchiveDeleteRequest() !== null)
+  await clientExports.archiveWorkspaceSessions()
+  const archives = archiveFixture.calls.filter((call) => call.kind === 'archive')
+  ok(
+    'archive-on-delete: an active Session is archived after stopping its work',
+    JSON.stringify(archives.map((call) => [call.sessionId, call.stopActivity])) === JSON.stringify([['s-1', false], ['s-1', true], ['s-2', false]]),
+    JSON.stringify(archives),
+  )
+  ok('archive-on-delete: the finished question closes itself', clientExports.readArchiveDeleteRequest() === null)
+  ok('archive-on-delete: the shell click is replayed after archiving', handle.replayed === 1, String(handle.replayed))
+  ok('archive-on-delete: no direct delete command was issued', archiveFixture.calls.every((call) => call.kind !== 'delete'))
+  handle.close()
+}
+
+// A real failure keeps the Workspace in place: the question stays open with the
+// reason, and the shell click is NOT replayed.
+{
+  resetArchiveFixture()
+  archiveFixture.archiveHandler = () => {
+    const error = new Error('disk full')
+    error.rpcError = { code: 'storage/error', message: '磁盘写入失败' }
+    throw error
+  }
+  const handle = makeShellDeleteDialog({ description: '将把“demo”从工作区列表中移除。' })
+  dispatchDocumentClick(handle.confirm)
+  await clientExports.archiveWorkspaceSessions()
+  const request = clientExports.readArchiveDeleteRequest()
+  ok('archive-on-delete: a failed archive reports the Host reason', request?.phase === 'error' && request.error.includes('归档失败') && request.error.includes('磁盘写入失败'), String(request?.error))
+  ok('archive-on-delete: a failed archive does not delete the Workspace', handle.replayed === 0, String(handle.replayed))
+  clientExports.cancelArchiveDelete()
+  ok('archive-on-delete: cancelling closes the question', clientExports.readArchiveDeleteRequest() === null && handle.replayed === 0)
+  ok('archive-on-delete: cancelling also dismisses the shell confirmation', handle.cancelled === 1, String(handle.cancelled))
+  handle.close()
+}
+
+// The dialog and its long press. A stray click cannot archive anything: the
+// answer fires only after the press is held for the full interval.
+{
+  resetArchiveFixture()
+  const handle = makeShellDeleteDialog({ description: '将把“demo”从工作区列表中移除。' })
+  dispatchDocumentClick(handle.confirm)
+  const cells = { values: [], index: 0 }
+  let rendered = renderWithHooks(clientExports.ArchiveDeleteDialog, {}, cells)
+  let tree = rendered.tree
+  const modal = findElements(tree, (element) => element.type === 'div' && element.props?.role === 'dialog')[0]
+  ok('archive-on-delete dialog: renders a modal with the Workspace name and count', modal !== undefined && String(modal.props.description).includes('demo') && String(modal.props.description).includes('2'), String(modal?.props?.description))
+  const holdButton = findAllByClass(tree, 'dsh-workspace-plus-hold')[0]
+  ok('archive-on-delete dialog: the destructive answer is a hold button', holdButton !== undefined && holdButton.type === 'button' && holdButton.props['aria-label'].includes('按住'))
+  ok('archive-on-delete dialog: the footer offers cancel, plain delete and the hold', findAllByClass(tree, 'dsh-workspace-plus-footer').length === 1 && findAllByClass(tree, 'dsh-workspace-plus-hold').length === 1)
+  ok('archive-on-delete dialog: it explains the archive is reversible and stops running work', collectText(tree).includes('未分组') || collectText(tree).includes('归档'), collectText(tree).slice(0, 80))
+
+  holdButton.props.onPointerDown()
+  flushAnimationFrames(1000)
+  rendered = renderWithHooks(clientExports.ArchiveDeleteDialog, {}, cells)
+  tree = rendered.tree
+  const holdingButton = findAllByClass(tree, 'dsh-workspace-plus-hold')[0]
+  ok('archive-on-delete hold: the label switches to the holding state', collectText(holdingButton).includes('继续按住'), collectText(holdingButton))
+  ok('archive-on-delete hold: the fill starts empty', String(findAllByClass(tree, 'dsh-workspace-plus-hold-fill')[0]?.props?.style?.width) === '0%', String(findAllByClass(tree, 'dsh-workspace-plus-hold-fill')[0]?.props?.style?.width))
+
+  flushAnimationFrames(1900)
+  rendered = renderWithHooks(clientExports.ArchiveDeleteDialog, {}, cells)
+  tree = rendered.tree
+  ok('archive-on-delete hold: the fill tracks the press', String(findAllByClass(tree, 'dsh-workspace-plus-hold-fill')[0]?.props?.style?.width) === '75%', String(findAllByClass(tree, 'dsh-workspace-plus-hold-fill')[0]?.props?.style?.width))
+  ok('archive-on-delete hold: nothing is archived before the interval elapses', archiveFixture.calls.length === 0, JSON.stringify(archiveFixture.calls))
+
+  flushAnimationFrames(2300)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  ok('archive-on-delete hold: the full press archives the Sessions', archiveFixture.calls.filter((call) => call.kind === 'archive').length === 2, JSON.stringify(archiveFixture.calls))
+  ok('archive-on-delete hold: the full press replays the shell click', handle.replayed === 1, String(handle.replayed))
+  ok('archive-on-delete hold: the question closes afterwards', clientExports.readArchiveDeleteRequest() === null)
+  handle.close()
+}
+
+// Releasing early cancels the press: no frame runs after the release, and the
+// question stays open for the user to decide again.
+{
+  resetArchiveFixture()
+  const handle = makeShellDeleteDialog({ description: '将把“demo”从工作区列表中移除。' })
+  dispatchDocumentClick(handle.confirm)
+  const cells = { values: [], index: 0 }
+  let rendered = renderWithHooks(clientExports.ArchiveDeleteDialog, {}, cells)
+  let holdButton = findAllByClass(rendered.tree, 'dsh-workspace-plus-hold')[0]
+  holdButton.props.onPointerDown()
+  flushAnimationFrames(1000)
+  holdButton.props.onPointerUp()
+  flushAnimationFrames(5000)
+  rendered = renderWithHooks(clientExports.ArchiveDeleteDialog, {}, cells)
+  holdButton = findAllByClass(rendered.tree, 'dsh-workspace-plus-hold')[0]
+  ok('archive-on-delete hold: an early release archives nothing', archiveFixture.calls.length === 0, JSON.stringify(archiveFixture.calls))
+  ok('archive-on-delete hold: an early release keeps the question open', clientExports.readArchiveDeleteRequest() !== null)
+  ok('archive-on-delete hold: the button returns to its resting label', collectText(holdButton).includes('长按归档并删除'), collectText(holdButton))
+  clientExports.cancelArchiveDelete()
+  ok('archive-on-delete hold: cancelling after an early release dismisses the shell dialog', handle.cancelled === 1, String(handle.cancelled))
+  handle.close()
+}
+
+// Without the Workspace service the interceptor matches nothing: a composition
+// that does not ship the controller keeps the shell's plain confirmation.
+{
+  const request = clientExports.readArchiveDeleteRequest()
+  ok('archive-on-delete: state is clean for the remaining tests', request === null)
+}
+
+
 /** Collect the `name:` values of every loader row a profile-layer file declares. */
 const readRowNames = (file) => {
   if (file === null || !existsSync(file)) return []

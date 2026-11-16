@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>sidebar · folded</title>
+    <link rel="stylesheet" href="./theme.css" />
+    <link rel="stylesheet" href="./vendor.css" />
+    <link rel="stylesheet" href="./shell.css" />
+    <link rel="stylesheet" href="./rows.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--dsw-alias-bg-base);
+        color: var(--dsw-alias-label-primary);
+      }
+      .frame {
+        box-sizing: border-box;
+        width: 330px;
+        height: 100%;
+        padding: 20px 8px;
+        background: var(--dsw-alias-bg-base);
+      }
+      .caption {
+        margin: 0 0 14px 10px;
+        color: var(--dsw-alias-label-secondary);
+        font: 12px/20px system-ui;
+      }
+      .note {
+        margin: -6px 0 14px 10px;
+        color: var(--dsw-alias-label-tertiary);
+        font: 11px/18px system-ui;
+      }
+      /* Headless capture drives no animation clock. */
+      *,
+      *::before,
+      *::after {
+        animation: none !important;
+      }
+    </style>
+  </head>
+  <body data-ds-dark-theme>
+    <div class="frame">
+      <p class="caption">侧边栏 · 折叠的工作区</p>
+      <p class="note">收起后仍显示正在运行、等待处理、已完成还没看的对话</p>
+      <div id="sidebar" data-slot="sidebar.workspaces"></div>
+    </div>
+    <script src="./react.development.js"></script>
+    <script src="./react-dom.development.js"></script>
+    <script src="./harness.js"></script>
+    <script src="./client.js"></script>
+    <script src="./boot-active.js"></script>
+  </body>
+</html>

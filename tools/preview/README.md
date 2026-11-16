@@ -122,6 +122,7 @@ $d = "D:/plugins/dsh/dsh-workspaceplus/docs"
 ./shot.ps1 -Url "$p/index.html?tooltip=1"        -Out "$d/dialog-tooltip.png" -Width 1000 -Height 720
 ./shot.ps1 -Url "$p/index.html?view=settings"    -Out "$d/settings.png"        -Width 1000 -Height 460
 ./shot.ps1 -Url "$p/sidebar.html"                -Out "$d/row-button.png"      -Width 420  -Height 210
+./shot.ps1 -Url "$p/active.html"                 -Out "$d/collapsed-active.png" -Width 360 -Height 300
 ```
 
 | Page | Flags | Shows |
@@ -131,6 +132,7 @@ $d = "D:/plugins/dsh/dsh-workspaceplus/docs"
 | `index.html` | `?tooltip=1` | the shield badge's warning bubble |
 | `index.html` | `?view=settings` | the settings page's per-workspace switches |
 | `sidebar.html` | — | the workspace row, with this plugin's button seated between 「更多」and 「新会话」 |
+| `active.html` | — | a folded Workspace that still shows its running, waiting and unread conversations |
 
 `-Url` must be a `file:///` URL. A bare `D:/…/index.html?picked=1` path is read
 as a *filename*, so the page never loads and Edge writes nothing — while still
@@ -142,3 +144,9 @@ calls the real `installWorkspaceRowButtons()` against that DOM, so the screensho
 shows the actual injection, seat and all. The page forces the hover state (the
 shell only reveals the action cluster on hover) because a headless capture cannot
 hover.
+
+`active.html` is the folded-workspace counterpart: its folder rows are the shell's
+own markup (`projectRow` from `rows.css`), and the working rows come from the real
+`installCollapsedActiveSessions()` against fake Workspace/Session/status services,
+so the screenshot shows the seat, the indent and the status dots, not a hand-drawn
+mock.

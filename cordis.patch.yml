@@ -16,19 +16,27 @@
 #                  store, context injection, workspace_dirs tool, HTTP route —
 #                  and the browser half (exports "./client" -> lib/client.js)
 #                  adds the directory dialog, the workspace-row buttons, the `@`
-#                  source and the workspace+ settings page.
+#                  source, the workspace+ settings page (this row's
+#                  `plugins.row.config` page on the plugin detail page, not a
+#                  Settings section), and the interception of the shell's
+#                  "删除工作区" confirmation that offers archiving the Workspace's
+#                  conversations first (long-press to confirm).
 #
 #   notice         the Windows-notification sub-feature merged from dsh-notice
 #                  (exports "./notice" -> lib/notice/index.js). Node half only:
 #                  it watches approval/question/turn-end/agent-error events and
-#                  raises Windows toasts; its settings page and click-to-open
-#                  poll ride in the shared browser half, which serves them
-#                  regardless and degrades silently when this row is off.
+#                  raises Windows toasts; its settings page (this row's
+#                  `plugins.row.config` page on the plugin detail page) and
+#                  click-to-open poll ride in the shared browser half, which
+#                  serves them regardless and degrades silently when this row is
+#                  off.
 #
 # Turning one row off removes exactly that half from the host while the bundle
 # and the other sub-features keep working. The 通知 settings page also carries a
 # runtime "启用桌面通知" switch, so notifications can be silenced without
-# touching the row at all.
+# touching the row at all. Both settings pages live on the plugin detail page:
+# open the bundle's card, then the configure control on the workspaceplus or
+# notice row. Nothing is registered into `settings.section`.
 - insert:
     - id: workspaceplus
       name: 'dsh-workspace-plus'
