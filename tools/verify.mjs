@@ -128,7 +128,7 @@ const missingDir = join(work, 'nope')
 ok('lib/index.js: exports a name', typeof host.name === 'string' && host.name.length > 0, host.name)
 ok('lib/index.js: exports apply()', typeof host.apply === 'function')
 ok('lib/index.js: declares the services it needs', Array.isArray(host.inject) && host.inject.includes('tools') && host.inject.includes('systemPrompt'), JSON.stringify(host.inject))
-ok('lib/index.js: imports only Node builtins', !/^\s*import\s[^\n]*from\s+'(?!node:)/m.test(read(pkg.main)))
+ok('lib/index.js: imports only Node builtins and its own sibling modules', !/^\s*import\s[^\n]*from\s+'(?!node:|\.\/)/m.test(read(pkg.main)))
 
 ok('dshHome(): honors DSH_HOME', host.dshHome({ DSH_HOME: work }) === work)
 ok('dshHome(): falls back to ~/.dsh', host.dshHome({}).endsWith(join('.dsh')))
@@ -787,7 +787,7 @@ ok('lib/notice/index.js: exports apply()', typeof noticeHost.apply === 'function
 ok('lib/notice/index.js: keeps the dsh-notice API path', noticeHost.API_PATH === '/dsh-notice/api', noticeHost.API_PATH)
 ok('lib/notice/index.js: keeps the dsh-notice open path', noticeHost.OPEN_PATH === '/dsh-notice/api/open', noticeHost.OPEN_PATH)
 ok('lib/notice/index.js: keeps the dsh-notice pending path', noticeHost.PENDING_PATH === '/dsh-notice/api/pending', noticeHost.PENDING_PATH)
-ok('lib/notice/index.js: imports only Node builtins and sibling modules', !/^\s*import\s[^\n]*from\s+'(?!node:|\.\/)/m.test(read('lib/notice/index.js')))
+ok('lib/notice/index.js: imports only Node builtins and sibling modules', !/^\s*import\s[^\n]*from\s+'(?!node:|\.\.?\/)/m.test(read('lib/notice/index.js')))
 ok('lib/notice/package.json: declares its own name and icon', (() => {
   const sub = JSON.parse(read('lib/notice/package.json'))
   return typeof sub.name === 'string' && sub.name.length > 0 && typeof sub.icon === 'string' && sub.icon.startsWith('./')
@@ -819,7 +819,7 @@ for (const lang of ['zh', 'en']) {
   const noticeCaptured = { routes: new Map(), listeners: new Map(), effects: [], warns: [] }
   const noticeCtx = {
     logger: { warn: (error) => noticeCaptured.warns.push(String(error)), info: () => {} },
-    get: (key) => (key === 'connection' ? undefined : undefined),
+    get: (key) => (key === 'connection' ? admittingConnection : undefined),
     on(event, handler, options) {
       noticeCaptured.listeners.set(event, { handler, options })
     },
@@ -863,6 +863,76 @@ for (const lang of ['zh', 'en']) {
   })
   ok('notice host: the approval observer delegates the decision unchanged', delegatedToNext === true && outcome === 'decision')
   ok('notice host: the pending-open intent expires', noticeHost.PENDING_PATH !== undefined)
+}
+
+// The notice routes ask the Host the same question the workspace+ route asks —
+// `connection.admit`, through the same shared helper — and carry no loopback
+// exemption. Each connection shape gets a fresh host, so "no authority" and
+// "authority says no" stay distinguishable.
+{
+  const noticeRoutes = (connection) => {
+    const routes = new Map()
+    const ctx = {
+      logger: { warn: () => {}, info: () => {} },
+      get: (key) => (key === 'connection' ? connection : undefined),
+      on: () => {},
+      effect: (fn) => fn(),
+      inject: (deps, callback) => {
+        if (!deps.includes('webServer')) return
+        callback({
+          effect: (fn) => fn(),
+          webServer: { register: (route) => { routes.set(route.path, route.handler); return () => {} } },
+        })
+      },
+    }
+    noticeHost.apply(ctx, { registerProtocol: false, sound: false, focusOnClick: false })
+    return routes
+  }
+  const callNoticeRoute = async (routes, path, method = 'GET', headers = {}, body) => {
+    const response = fakeResponse()
+    const chunks = body === undefined ? [] : [Buffer.from(JSON.stringify(body), 'utf8')]
+    await routes.get(path)({ method, headers, async *[Symbol.asyncIterator]() { for (const chunk of chunks) yield chunk } }, response)
+    return response
+  }
+
+  const unauth = noticeRoutes(undefined)
+  const unauthRead = await callNoticeRoute(unauth, noticeHost.API_PATH)
+  ok('notice route: GET fails closed without a connection service', unauthRead.status === 503, String(unauthRead.status))
+  ok('notice route: the fail-closed answer carries no settings', !unauthRead.body.includes('"settings"'), unauthRead.body.slice(0, 60))
+  const unauthWrite = await callNoticeRoute(unauth, noticeHost.API_PATH, 'POST', { 'content-type': 'application/json' }, { op: 'patch', patch: { enabled: false } })
+  ok('notice route: POST fails closed without a connection service', unauthWrite.status === 503, String(unauthWrite.status))
+  const unauthPending = await callNoticeRoute(unauth, noticeHost.PENDING_PATH)
+  ok('notice route: the pending poll fails closed without a connection service', unauthPending.status === 503, String(unauthPending.status))
+
+  const denied = noticeRoutes({ admit: () => ({ rejection: 401 }) })
+  const deniedRead = await callNoticeRoute(denied, noticeHost.API_PATH)
+  ok('notice route: passes a 401 rejection through', deniedRead.status === 401, String(deniedRead.status))
+  const asyncDenied = noticeRoutes({ admit: async () => ({ rejection: 403 }) })
+  const asyncDeniedRead = await callNoticeRoute(asyncDenied, noticeHost.API_PATH)
+  ok('notice route: an asynchronous rejection is awaited, not mistaken for an admission', asyncDeniedRead.status === 403, String(asyncDeniedRead.status))
+  const throwing = noticeRoutes({ admit: () => { throw new Error('auth store offline') } })
+  const throwingRead = await callNoticeRoute(throwing, noticeHost.API_PATH)
+  ok('notice route: fails closed when admit throws', throwingRead.status === 503, String(throwingRead.status))
+  const noAdmit = noticeRoutes({})
+  const noAdmitRead = await callNoticeRoute(noAdmit, noticeHost.API_PATH)
+  ok('notice route: fails closed when admit is missing', noAdmitRead.status === 503, String(noAdmitRead.status))
+
+  const admitted = noticeRoutes(admittingConnection)
+  const admittedRead = await callNoticeRoute(admitted, noticeHost.API_PATH)
+  ok('notice route: answers 200 when the Host admits', admittedRead.status === 200 && JSON.parse(admittedRead.body).ok === true, String(admittedRead.status))
+
+  // The click target is not admitted by the Host: the launcher has no session
+  // cookie, so it presents its own token instead. Without it the route refuses
+  // 403 even where every browser route would answer 503 — proof that a refused
+  // request is never silently let through by its source address.
+  const openRoutes = noticeRoutes(undefined)
+  const openRefused = await callNoticeRoute(openRoutes, noticeHost.OPEN_PATH)
+  ok('notice route: the click target refuses a request without its token', openRefused.status === 403, String(openRefused.status))
+
+  ok(
+    'lib/notice/index.js: no request is admitted merely for coming from this machine',
+    !/isLoopbackRequest|LOOPBACK_ADDRESSES|loopback exemption is for/.test(read('lib/notice/index.js')),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -1288,7 +1358,7 @@ ok(
   const launcherCaptured = { routes: new Map() }
   const launcherCtx = {
     logger: { warn: () => {}, info: () => {} },
-    get: () => undefined,
+    get: (key) => (key === 'connection' ? admittingConnection : undefined),
     on: () => {},
     effect: (fn) => fn(),
     inject: (deps, callback) => {

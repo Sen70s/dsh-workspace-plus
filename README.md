@@ -4,7 +4,7 @@
 [![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/sen70s/dsh-workspace-plus)
 [![license](https://img.shields.io/npm/l/dsh-workspace-plus.svg)](https://github.com/Sen70s/dsh-workspace-plus/blob/main/LICENSE)
 
-**当前版本 `v0.9.0`** · 要求 DSH `>=0.1.7-rc.2`
+**当前版本 `v0.9.1`** · 要求 DSH `>=0.1.7-rc.2`
 
 DeepSeek Harness（DSH）的插件。一个插件，两个子功能，插件页里各占一行、可单独启停。
 
@@ -105,6 +105,8 @@ DSH 删除工作区时并不删对话：那些会话会失去归属，堆到侧�
 
 设置存在 `~/.dsh/notice/`，协议 scheme 是 `dsh-notice:` —— 从独立 dsh-notice 插件升级过来时，已有设置与协议注册自动生效。
 
+通知的设置与轮询接口 `/dsh-notice/api`、`/dsh-notice/api/pending` 和 workspace+ 一样要过宿主的 `connection.admit`：认证缺失一律 **503**，**不会**因为请求来自本机就放行。点通知触发的 `/dsh-notice/api/open` 是唯一例外 —— 点击启动器不是浏览器、没有会话，改用注册命令里那个每进程随机的 token 认证，没带 token 直接 **403**。
+
 ## 自检
 
 不需要安装、不需要 DSH 在跑：
@@ -113,13 +115,14 @@ DSH 删除工作区时并不删对话：那些会话会失去归属，堆到侧�
 node tools/verify.mjs
 ```
 
-681 项断言，覆盖 manifest、patch 层、宿主半（含 `/workspaceplus/api` 在认证服务缺失时的拒绝、工作区排序开关与冷却分钟数的设置往返）、浏览器半、工作区行按钮、`@` 候选源、弹窗形状、删除工作区时的归档拦截（含长按与回放）、侧栏工作区排序（只认真正开始的工作、文件夹忙时不排、冷却窗口、`insertBefore` 提交、开关关掉后不再重排）、以及通知点击启动器的编译与回退（含真实 `csc.exe` 编译一次并自检）。
+692 项断言，覆盖 manifest、patch 层、宿主半（含 `/workspaceplus/api` 与 `/dsh-notice/api` 在认证服务缺失时的拒绝、工作区排序开关与冷却分钟数的设置往返）、浏览器半、工作区行按钮、`@` 候选源、弹窗形状、删除工作区时的归档拦截（含长按与回放）、侧栏工作区排序（只认真正开始的工作、文件夹忙时不排、冷却窗口、`insertBefore` 提交、开关关掉后不再重排）、以及通知点击启动器的编译与回退（含真实 `csc.exe` 编译一次并自检）。
 
 ## 其它
 
 - `lib/` 是手写源码，**不需要打包步骤**（没有 bundler）：从 npm、GitHub、本地目录三种方式装到的都是可直接加载的代码。唯一的例外是通知点击助手 —— 它由宿主在首次注册协议跳转时（插件加载后就会发生）用系统自带的 `csc.exe` 从 `lib/notice/click-host.cs` 现编到 `~/.dsh/notice/` 并缓存；编译不可用时自动退化为 PowerShell 启动器，插件其余部分不受影响。
 - workspace+ 的状态文件在 `~/.dsh/workspaceplus/directories.json`，可以直接手改，改完刷新页面即可。
 - workspace+ 的浏览器接口 `/workspaceplus/api` 每次请求都要过宿主的 `connection.admit` 认证。认证服务缺失、`admit` 不存在或报错时一律 **503**，读写都不放行——这个接口写下的目录备注会进入模型上下文，不能让未认证的调用方有机会修改它。
+- 通知的 `/dsh-notice/api`、`/dsh-notice/api/pending` 走同一个共享的 `lib/admission.js`：认证服务缺失、`admit` 缺失或报错时同样一律 **503**，本机来源不再豁免；点通知走的 `/dsh-notice/api/open` 只认注册命令里的每进程 token，没有 token 就是 **403**。
 - [LICENSE](./LICENSE) · MIT
 
 ## Star History
