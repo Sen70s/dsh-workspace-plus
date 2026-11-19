@@ -15,3 +15,6 @@ tools/preview/shell.css
 tools/preview/vendor.css
 tools/preview/theme.css
 tools/preview/rows.css
+
+# 宣传片工作目录：30s 亮色宣传片的画布与工程，不进仓库、不进 npm 包。
+promo/

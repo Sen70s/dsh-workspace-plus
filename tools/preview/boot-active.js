@@ -1,10 +1,10 @@
 /**
  * Sidebar demo: a folded Workspace that still shows its working conversations.
  *
- * The rows are the shell's own markup (projectRow from rows.css); the working
- * rows are NOT written here — they come from the plugin's real
- * installCollapsedActiveSessions() against fake services shaped like the
- * shell's projections. So the screenshot shows the seat as it will render.
+ * The rows are the shell's own markup, class names and all (rows.css). The fold
+ * is NOT drawn here: boot calls the plugin's real seat against fake projections
+ * and then clicks the folder row, exactly as the user would. The screenshot
+ * therefore shows the plugin's fold over the shell's own Session rows.
  */
 const sandbox = window.__previewSandbox
 
@@ -48,20 +48,53 @@ const svg = (paths, stroke) => {
   return node
 }
 
-function buildRow({ id, label }) {
+/** The shell's StateDot, close enough for the extracted stylesheet. */
+function stateDot(state) {
+  const ns = 'http://www.w3.org/2000/svg'
+  const dot = document.createElement('span')
+  dot.className = '_dot_1i3xo_2'
+  dot.style.width = '6px'
+  dot.style.height = '6px'
+  if (state !== 'ongoing') {
+    dot.setAttribute('data-state', state)
+    return dot
+  }
+  dot.setAttribute('data-state', 'ongoing')
+  dot.style.color = 'var(--dsw-alias-state-business-primary)'
+  const ring = document.createElementNS(ns, 'svg')
+  ring.setAttribute('width', '6')
+  ring.setAttribute('height', '6')
+  ring.setAttribute('viewBox', '0 0 16 16')
+  ring.style.animation = '_dsh-state-dot-spin_1i3xo_1 1s linear infinite'
+  const circle = document.createElementNS(ns, 'circle')
+  circle.setAttribute('cx', '8')
+  circle.setAttribute('cy', '8')
+  circle.setAttribute('r', '6')
+  circle.setAttribute('fill', 'none')
+  circle.setAttribute('stroke', 'currentColor')
+  circle.setAttribute('stroke-width', '2')
+  circle.setAttribute('stroke-dasharray', '12 26')
+  circle.setAttribute('stroke-linecap', 'round')
+  ring.appendChild(circle)
+  dot.appendChild(ring)
+  return dot
+}
+
+/** One workspace row, built exactly like the shell's ProjectRowItem. */
+function buildRow({ id, label, expanded }) {
   const row = document.createElement('div')
   row.className = 'projectRow'
   row.setAttribute('data-row-key', 'workspace:' + id)
   row.setAttribute('role', 'treeitem')
-  row.setAttribute('aria-expanded', 'false')
+  row.setAttribute('aria-expanded', expanded ? 'true' : 'false')
 
   const folder = document.createElement('span')
-  folder.className = 'slot'
+  folder.className = 'slot folder'
   folder.appendChild(svg(FOLDER_CLOSED))
   row.appendChild(folder)
 
   const chevron = document.createElement('span')
-  chevron.className = 'slot'
+  chevron.className = 'slot chevron'
   const triangle = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   triangle.setAttribute('width', '14')
   triangle.setAttribute('height', '14')
@@ -100,43 +133,69 @@ function buildRow({ id, label }) {
   return row
 }
 
+/** One native Session row: slot + title + time, exactly rows.css's shape. */
+function buildSessionRow({ id, title, time, state }) {
+  const row = document.createElement('div')
+  row.className = 'sessionRow'
+  row.setAttribute('data-row-key', 'session:' + id)
+  row.setAttribute('role', 'treeitem')
+
+  const slot = document.createElement('span')
+  slot.className = 'slot'
+  if (state !== 'idle') slot.appendChild(stateDot(state))
+  const titleEl = document.createElement('span')
+  titleEl.className = 'title'
+  titleEl.textContent = title
+  const timeEl = document.createElement('span')
+  timeEl.className = 'time'
+  timeEl.textContent = time
+  row.appendChild(slot)
+  row.appendChild(titleEl)
+  row.appendChild(timeEl)
+  return row
+}
+
 const sidebar = document.getElementById('sidebar')
-for (const [id, label] of [['ws-1', 'wanderisland'], ['ws-2', 'api']]) {
+const groupFor = (spec) => {
   const section = document.createElement('div')
   section.style.setProperty('--dsh-workspace-indent', '0px')
-  section.appendChild(buildRow({ id, label }))
+  section.appendChild(buildRow({ id: spec.id, label: spec.label, expanded: spec.expanded }))
+  for (const session of spec.sessions) section.appendChild(buildSessionRow(session))
   sidebar.appendChild(section)
 }
 
-// A hidden native Session row, the shape the shell renders under an expanded
-// folder. The plugin reads the row/slot/title/time tokens off it, so this page
-// previews the real native styling instead of the plugin's fallback sheet.
-const template = document.createElement('div')
-template.className = 'sessionRow'
-template.setAttribute('data-row-key', 'session:template')
-template.setAttribute('aria-hidden', 'true')
-template.style.display = 'none'
-for (const cls of ['slot', 'title', 'time']) {
-  const cell = document.createElement('span')
-  cell.className = cls
-  template.appendChild(cell)
-}
-document.body.appendChild(template)
+groupFor({
+  id: 'ws-1',
+  label: 'wanderisland',
+  expanded: true,
+  sessions: [
+    { id: 's1', title: '修复登录重试把 token 冲掉的问题', time: '刚刚', state: 'ongoing' },
+    { id: 's2', title: '重构权限校验中间件', time: '待审批', state: 'warning' },
+    { id: 's3', title: '更新 README 的安装步骤', time: '5分钟前', state: 'done' },
+    { id: 's4', title: '整理发布检查清单', time: '2小时前', state: 'idle' },
+    { id: 's5', title: '和 api 仓库对齐接口命名', time: '昨天', state: 'idle' },
+  ],
+})
+groupFor({ id: 'ws-2', label: 'api', expanded: false, sessions: [] })
 
 const now = Date.now()
 const byId = {
   s1: { id: 's1', title: '修复登录重试把 token 冲掉的问题', updatedAt: now - 30000, running: true },
   s2: { id: 's2', title: '重构权限校验中间件', updatedAt: now - 120000 },
   s3: { id: 's3', title: '更新 README 的安装步骤', updatedAt: now - 300000 },
+  s4: { id: 's4', title: '整理发布检查清单', updatedAt: now - 7200000 },
+  s5: { id: 's5', title: '和 api 仓库对齐接口命名', updatedAt: now - 86400000 },
 }
 const statuses = new Map([
   ['s1', { running: true }],
   ['s2', { pendingInteraction: { kind: 'approval' } }],
   ['s3', { completionUnread: true }],
+  ['s4', { running: false }],
+  ['s5', { running: false }],
 ])
 const sessionsService = {
   list: {
-    getSnapshot: () => ({ phase: 'ready', ids: ['s1', 's2', 's3'], byId, projectionsBySession: {} }),
+    getSnapshot: () => ({ phase: 'ready', ids: ['s1', 's2', 's3', 's4', 's5'], byId, projectionsBySession: {} }),
     subscribe: () => () => {},
   },
 }
@@ -145,7 +204,7 @@ const workspacesService = {
     getSnapshot: () => ({
       phase: 'ready',
       items: [
-        { workspaceId: 'ws-1', path: 'D:\\projects\\wanderisland', title: 'wanderisland', sessionIds: ['s1', 's2', 's3'] },
+        { workspaceId: 'ws-1', path: 'D:\\projects\\wanderisland', title: 'wanderisland', sessionIds: ['s1', 's2', 's3', 's4', 's5'] },
         { workspaceId: 'ws-2', path: 'D:\\projects\\api', title: 'api', sessionIds: [] },
       ],
       archivedSessionIds: [],
@@ -154,10 +213,7 @@ const workspacesService = {
   },
 }
 const uiSession = {
-  sessionStatus: {
-    getSnapshot: () => statuses,
-    subscribe: () => () => {},
-  },
+  sessionStatus: { getSnapshot: () => statuses, subscribe: () => () => {} },
 }
 
 window.fetch = async () => ({
@@ -183,44 +239,9 @@ window.fetch = async () => ({
   },
 })
 
-/**
- * The shell's StateDot, markup-for-markup where the shell's own stylesheet can
- * carry it: a bare `._dot_…` span with `data-state` (the sheet draws the dot),
- * and a stroked ring for `ongoing` (the sheet's spin keyframes).
- */
-function PreviewStateDot({ state }) {
-  if (state !== 'ongoing') {
-    return window.React.createElement('span', { className: '_dot_1i3xo_2', 'data-state': state, style: { width: '6px', height: '6px' } })
-  }
-  return window.React.createElement(
-    'span',
-    {
-      className: '_dot_1i3xo_2',
-      'data-state': 'ongoing',
-      style: { width: '6px', height: '6px', color: 'var(--dsw-alias-state-business-primary)' },
-    },
-    window.React.createElement(
-      'svg',
-      { width: '6', height: '6', viewBox: '0 0 16 16', style: { animation: '_dsh-state-dot-spin_1i3xo_1 1s linear infinite' } },
-      window.React.createElement('circle', {
-        cx: '8',
-        cy: '8',
-        r: '6',
-        fill: 'none',
-        stroke: 'currentColor',
-        strokeWidth: '2',
-        strokeDasharray: '12 26',
-        strokeLinecap: 'round',
-      }),
-    ),
-  )
-}
-
 const plugin = window.__materializePlugin({
   react: sandbox.React,
-  '@deepseek-ai/dsh-client-ui-primitives': { ...sandbox.primitives, StateDot: PreviewStateDot },
-  'react-dom/client': { createRoot: window.ReactDOM.createRoot },
-  'react-dom': { flushSync: window.ReactDOM.flushSync },
+  '@deepseek-ai/dsh-client-ui-primitives': sandbox.primitives,
 })
 
 const ctx = {
@@ -270,6 +291,18 @@ try {
   document.body.appendChild(note)
 }
 
+// Fold the first folder exactly the way a reader would; ?unfold=1 then
+// folds it back by clicking again, so the second state can be checked too.
+const params = new URLSearchParams(location.search)
+const folderRow = sidebar.querySelector('[data-row-key="workspace:ws-1"]')
+if (folderRow !== null) {
+  folderRow.click()
+  if (params.get('unfold') === '1') folderRow.click()
+}
+
 window.__previewFolded = () => ({
-  rows: Array.from(document.querySelectorAll('.dsh-workspace-plus-active-row')).map((row) => row.textContent),
+  folded: document.querySelectorAll('.dsh-workspace-plus-folded').length,
+  visible: Array.from(document.querySelectorAll('[data-row-key^="session:"]'))
+    .filter((row) => row.offsetParent !== null)
+    .map((row) => row.getAttribute('data-row-key')),
 })

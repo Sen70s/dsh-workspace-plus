@@ -145,8 +145,9 @@ shows the actual injection, seat and all. The page forces the hover state (the
 shell only reveals the action cluster on hover) because a headless capture cannot
 hover.
 
-`active.html` is the folded-workspace counterpart: its folder rows are the shell's
-own markup (`projectRow` from `rows.css`), and the working rows come from the real
-`installCollapsedActiveSessions()` against fake Workspace/Session/status services,
-so the screenshot shows the seat, the indent and the status dots, not a hand-drawn
+`active.html` is the folded-workspace counterpart: its folder and Session rows are
+the shell's own markup (`projectRow`/`sessionRow` from `rows.css`), and the fold is
+applied by the real `installCollapsedActiveSessions()` after boot clicks the folder
+row the way a reader would. The screenshot shows the actual filter and the
+closed-folder glyph, not a hand-drawn list.
 mock.

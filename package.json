@@ -1,6 +1,6 @@
 {
   "name": "dsh-workspace-plus",
-  "version": "0.9.0",
+  "version": "0.9.2",
   "description": "DeepSeek Harness plugin with two switchable sub-features: workspace+ (label several directories inside one workspace and reference them by absolute path — the @ composer source, the row button, the workspace_dirs tool — plus a delete-workspace confirmation that can archive the conversations first, a switchable recent-conversation sort for the sidebar workspace list, and a folded-workspace list that keeps running, waiting and unread conversations visible) and 通知/notice (Windows native notifications for running conversations, merged from dsh-notice). Each sub-feature is its own loader row and can be toggled on the plugin page; each row's settings page opens from the plugin detail page, not from Settings.",
   "icon": "icon.svg",
   "type": "module",

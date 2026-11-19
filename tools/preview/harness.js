@@ -249,16 +249,72 @@ const picker = {
 const sandbox = {
   React,
   ReactDOM,
-  primitives: { Button, Modal, Switch, Tooltip },
+  primitives: { Button, Modal, Switch, Tooltip, IconFolderCloseRegular: FolderCloseIcon, IconFolderOpenRegular: FolderOpenIcon },
   picker,
   FIXTURE,
   SETTINGS_FIXTURE,
 }
 window.__previewSandbox = sandbox
 
+/**
+ * The shell's `IconFolderCloseRegular` / `IconFolderOpenRegular`, artwork taken
+ * from the primitives bundle. The preview only needs them to draw, so they are
+ * the product's own paths rather than a lookalike.
+ */
+function FolderCloseIcon() {
+  return h(
+    'svg',
+    { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+    h('path', {
+      d: 'M6.79098 2.56324C7.09666 2.70214 7.34892 2.92853 7.51655 3.21365L8.1484 4.26636C8.21173 4.37188 8.32665 4.43531 8.44917 4.43531H12.5C13.0523 4.43531 13.5 4.88302 13.5 5.43531V11.5C13.5 12.6046 12.6046 13.5 11.5 13.5H4.5C3.39543 13.5 2.5 12.6046 2.5 11.5V4.5C2.5 3.39543 3.39543 2.5 4.5 2.5H6.48668C6.5918 2.5 6.69493 2.52167 6.79098 2.56324Z',
+      fill: 'currentColor',
+      opacity: 0.16,
+    }),
+    h('path', {
+      d: 'M6.4873 3.5H4.5C3.94772 3.5 3.5 3.94772 3.5 4.5V11.5C3.5 12.0523 3.94772 12.5 4.5 12.5H11.5C12.0523 12.5 12.5 12.0523 12.5 11.5V5.43531C12.5 5.15917 12.2761 4.93531 12 4.93531H8.44917C7.95672 4.93531 7.49664 4.68158 7.24043 4.25902L6.60986 3.2063C6.57631 3.15026 6.51528 3.11612 6.44963 3.11608L6.4873 3.5Z',
+      fill: 'currentColor',
+    }),
+  )
+}
+function FolderOpenIcon() {
+  return h(
+    'svg',
+    { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+    h('path', {
+      d: 'M2.5 4.5C2.5 3.94772 2.94772 3.5 3.5 3.5H6.48668C6.5918 3.5 6.69493 3.52167 6.79098 3.56324C7.09666 3.70214 7.34892 3.92853 7.51655 4.21365L8.1484 5.26636C8.21173 5.37188 8.32665 5.43531 8.44917 5.43531H12.5C13.0523 5.43531 13.5 5.88302 13.5 6.43531V11.5C13.5 12.6046 12.6046 13.5 11.5 13.5H4.5C3.39543 13.5 2.5 12.6046 2.5 11.5V4.5Z',
+      fill: 'currentColor',
+      opacity: 0.16,
+    }),
+    h('path', {
+      d: 'M2.5 7.5H13.5',
+      stroke: 'currentColor',
+      strokeWidth: 1,
+    }),
+  )
+}
+
+/** The shell's `react-dom/client`, which the fold seat uses to mount an icon. */
+const ReactDOMClient = {
+  createRoot(container) {
+    return {
+      render(node) {
+        ReactDOM.flushSync(() => {
+          ReactDOM.render(node, container)
+        })
+      },
+      unmount() {
+        ReactDOM.flushSync(() => {
+          ReactDOM.unmountComponentAtNode(container)
+        })
+      },
+    }
+  },
+}
+
 /** Materialize the captured plugin factory against a fixed module table. */
 window.__materializePlugin = (modules) =>
   factory((specifier) => {
+    if (specifier === 'react-dom/client') return ReactDOMClient
     if (!(specifier in modules)) throw new Error('preview: unexpected require("' + specifier + '")')
     return modules[specifier]
   })

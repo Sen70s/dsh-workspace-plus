@@ -2,9 +2,10 @@
 
 [![npm version](https://img.shields.io/npm/v/dsh-workspace-plus.svg)](https://www.npmjs.com/package/dsh-workspace-plus)
 [![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/sen70s/dsh-workspace-plus)
+[![开放插件市场](https://img.shields.io/endpoint?url=https%3A%2F%2Fdshopen.org%2Fbadge%2Fdsh-workspace-plus.json)](https://dshopen.org/zh/plugins/dsh-workspace-plus/)
 [![license](https://img.shields.io/npm/l/dsh-workspace-plus.svg)](https://github.com/Sen70s/dsh-workspace-plus/blob/main/LICENSE)
 
-**当前版本 `v0.9.1`** · 要求 DSH `>=0.1.7-rc.2`
+**当前版本 `v0.9.2`** · 要求 DSH `>=0.1.7-rc.2`
 
 DeepSeek Harness（DSH）的插件。一个插件，两个子功能，插件页里各占一行、可单独启停。
 
@@ -74,11 +75,14 @@ agent 直接去 D:\proj\backend，不会因为旁边有个 backend-legacy 而改
 
 文件夹一收，里面所有对话行都消失 —— 侧栏是短了，但也看不出哪个文件夹里还有任务在跑。这个功能让 **收起的工作区只保留「正在工作」的那几条对话**，其余照常收起：
 
-- **正在运行**（含子代理在跑）、**等待批准/回答**、以及**已完成但你还没看**的对话，会以小行显示在文件夹标题下面；空闲对话不显示。
+- **正在运行**（含子代理在跑）、**等待批准/回答**、以及**已完成但你还没看**的对话，会以 DSH 原生的会话行显示在文件夹标题下面；空闲对话不显示。
 - 没有正在工作的对话时，文件夹还是只有一行 —— 收起不会凭空变长。
-- 展开文件夹后，插件补的那几行自动消失，恢复原生列表（含「展开其余 N 个」）。
-- 树形分组下，子工作区跟着父文件夹一起收起时，子工作区里正在工作的对话也会挂到最外层折叠的文件夹下面。
-- 点这些小行直接打开对话；它们不参与拖拽、悬停也不出操作按钮，避免和原生行打架。
+- 展开文件夹后恢复完整列表（含「展开其余 N 个」）；插件只负责在收起时隐藏空闲行。
+- 树形分组下，子工作区跟着父文件夹一起收起时，子工作区里正在工作的对话也会留在最外层折叠的文件夹下面（子文件夹标题一并收起）。
+- 保留的就是 DSH 自己的会话行：hover 菜单（置顶/重命名/分支/归档/复制 ID）、行尾操作按钮、hover 卡片、选中高亮都照常可用。
+- 实现上，折叠变成了「过滤」：DSH 内部仍认为这个文件夹是展开的，插件只把空闲行隐藏起来。过滤的标记打在**分组容器**上（DSH 会把工作区行包一层 hover 卡片的 `<span>`，标记若落在那层上就没有任何会话行可过滤），所以收起、展开、再次收起始终一致，不会出现「点了没反应、再也展不开」。
+- 文件夹图标用的是 DSH 自己的图标组件（收起态就是 DSH 的关闭文件夹图标），不是另画一份 SVG。
+- 点开一个「已完成」的行后，它会先留在折叠列表里（展开文件夹或刷新页面后才消失），不会点一下就不见；当前打开的那一行也始终可见，选中态照常显示。
 - 开关在 **插件页 → `dsh-workspace-plus` → `workspaceplus` 行设置** 里，默认开。
 
 ![折叠的工作区里仍然显示正在工作的对话](https://raw.githubusercontent.com/Sen70s/dsh-workspace-plus/main/docs/collapsed-active.png)
@@ -115,7 +119,7 @@ DSH 删除工作区时并不删对话：那些会话会失去归属，堆到侧�
 node tools/verify.mjs
 ```
 
-692 项断言，覆盖 manifest、patch 层、宿主半（含 `/workspaceplus/api` 与 `/dsh-notice/api` 在认证服务缺失时的拒绝、工作区排序开关与冷却分钟数的设置往返）、浏览器半、工作区行按钮、`@` 候选源、弹窗形状、删除工作区时的归档拦截（含长按与回放）、侧栏工作区排序（只认真正开始的工作、文件夹忙时不排、冷却窗口、`insertBefore` 提交、开关关掉后不再重排）、以及通知点击启动器的编译与回退（含真实 `csc.exe` 编译一次并自检）。
+704 项断言，覆盖 manifest、patch 层、宿主半（先穷举两个子功能注册的每条路由，再逐个写操作验证：认证服务缺失时一律 503、状态文件一个字节都不变，`/workspaceplus/api`、`/dsh-notice/api`、`/dsh-notice/api/pending` 都在内；含工作区排序开关与冷却分钟数的设置往返）、浏览器半、工作区行按钮、`@` 候选源、弹窗形状、删除工作区时的归档拦截（含长按与回放）、侧栏工作区排序（只认真正开始的工作、文件夹忙时不排、冷却窗口、`insertBefore` 提交、开关关掉后不再重排）、以及通知点击启动器的编译与回退（含真实 `csc.exe` 编译一次并自检）。
 
 ## 其它
 
